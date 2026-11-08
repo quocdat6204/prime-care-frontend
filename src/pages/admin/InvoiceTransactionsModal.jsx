@@ -374,7 +374,7 @@ export default function InvoiceTransactionsModal({ invoice, onClose, patientName
                         </span>
                         <div>
                           <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--gray-900)' }}>
-                            Giao dịch #{txn.id} • {txn.paymentMethod || 'VNPAY'}
+                            Giao dịch #{txn.id} • {txn.paymentMethod === 'CASH' ? 'Tiền mặt tại quầy (CASH)' : (txn.paymentMethod || 'VNPAY')}
                           </div>
                           <div style={{ fontSize: '0.75rem', color: 'var(--gray-500)' }}>
                             Khởi tạo: {formatDateTime(txn.createdAt)}
@@ -455,28 +455,28 @@ export default function InvoiceTransactionsModal({ invoice, onClose, patientName
                       {/* vnpTransactionNo */}
                       <div>
                         <span style={{ color: 'var(--gray-500)', fontSize: '0.75rem', display: 'block', marginBottom: 2 }}>
-                          Mã giao dịch VNPay:
+                          {txn.paymentMethod === 'CASH' ? 'Mã chứng từ / Biên nhận:' : 'Mã giao dịch VNPay:'}
                         </span>
                         <strong style={{ color: txn.vnpTransactionNo ? '#0f172a' : 'var(--gray-400)' }}>
-                          {txn.vnpTransactionNo || 'Chưa ghi nhận'}
+                          {txn.vnpTransactionNo === 'CASH_COUNTER' ? 'Thu tiền mặt tại quầy' : (txn.vnpTransactionNo || 'Chưa ghi nhận')}
                         </strong>
                       </div>
 
                       {/* bankCode */}
                       <div>
                         <span style={{ color: 'var(--gray-500)', fontSize: '0.75rem', display: 'block', marginBottom: 2 }}>
-                          Ngân hàng thanh toán:
+                          {txn.paymentMethod === 'CASH' ? 'Kênh thanh toán:' : 'Ngân hàng thanh toán:'}
                         </span>
                         <span
                           style={{
                             fontWeight: 700,
-                            color: txn.bankCode ? '#1e40af' : 'var(--gray-500)',
-                            background: txn.bankCode ? '#eff6ff' : 'transparent',
-                            padding: txn.bankCode ? '1px 6px' : 0,
+                            color: txn.paymentMethod === 'CASH' ? '#15803d' : txn.bankCode ? '#1e40af' : 'var(--gray-500)',
+                            background: txn.paymentMethod === 'CASH' ? '#f0fdf4' : txn.bankCode ? '#eff6ff' : 'transparent',
+                            padding: '1px 6px',
                             borderRadius: 4,
                           }}
                         >
-                          {txn.bankCode || '—'}
+                          {txn.paymentMethod === 'CASH' ? 'Tiền mặt (CASH)' : (txn.bankCode || '—')}
                         </span>
                       </div>
 

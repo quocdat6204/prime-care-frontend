@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
-import { X, RefreshCw } from 'lucide-react';
+import { X, RefreshCw, UserPlus } from 'lucide-react';
 import { clinicService } from '../../services/clinicService';
 import { userService } from '../../services/userService';
 import { useToast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
 import { formatDoctorRank } from '../../utils/doctorRank';
+import WalkInModal from './WalkInModal';
 
 // Đầy đủ 7 trạng thái nghiệp vụ chuẩn theo tài liệu CLINIC_SERVICE_API.md
 const statusMap = {
@@ -25,6 +26,7 @@ export default function SessionAppointmentsModal({ session, onClose, initialFilt
   const [patientNames, setPatientNames] = useState({});
   const [loading, setLoading] = useState(false);
   const [filterMode, setFilterMode] = useState(initialFilterMode);
+  const [showWalkInModal, setShowWalkInModal] = useState(false);
 
   useEffect(() => {
     // Fallback load tên bệnh nhân nếu backend chưa kịp gắn patientName
@@ -231,23 +233,47 @@ export default function SessionAppointmentsModal({ session, onClose, initialFilt
               })}
             </div>
 
-            <button
-              type="button"
-              className="btn btn-sm btn-outline"
-              onClick={fetchAppointments}
-              disabled={loading}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                fontSize: '0.8rem',
-                whiteSpace: 'nowrap',
-                height: 32,
-              }}
-            >
-              <RefreshCw size={13} className={loading ? 'spin-slow' : ''} />
-              <span>Làm mới</span>
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {!isDoctor && session?.status === 'OPEN' && (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-primary"
+                  onClick={() => setShowWalkInModal(true)}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    fontSize: '0.8rem',
+                    whiteSpace: 'nowrap',
+                    background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)',
+                    borderColor: '#059669',
+                    fontWeight: 700,
+                    height: 32,
+                  }}
+                >
+                  <UserPlus size={14} />
+                  <span>Tiếp nhận tại quầy</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                className="btn btn-sm btn-outline"
+                onClick={fetchAppointments}
+                disabled={loading}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontSize: '0.8rem',
+                  whiteSpace: 'nowrap',
+                  height: 32,
+                }}
+              >
+                <RefreshCw size={13} className={loading ? 'spin-slow' : ''} />
+                <span>Làm mới</span>
+              </button>
+            </div>
           </div>
 
           {/* Body Table - Bảng rộng rãi, không bị rớt chữ xuống dòng */}
@@ -380,6 +406,17 @@ export default function SessionAppointmentsModal({ session, onClose, initialFilt
           </div>
         </div>
       </div>
+
+      {showWalkInModal && (
+        <WalkInModal
+          session={session}
+          onClose={() => setShowWalkInModal(false)}
+          onSuccess={() => {
+            setShowWalkInModal(false);
+            fetchAppointments();
+          }}
+        />
+      )}
     </>
   );
 }

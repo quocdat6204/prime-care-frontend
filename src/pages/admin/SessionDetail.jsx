@@ -3,13 +3,15 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
   ArrowLeft, Calendar, Clock, User, Stethoscope, CheckCircle2,
   AlertCircle, RefreshCw, Eye, FileText, ChevronRight, LayoutGrid,
-  ListFilter, Shield, Pill, Receipt, Award
+  ListFilter, Shield, Pill, Receipt, Award, UserPlus
 } from 'lucide-react';
 import { clinicService } from '../../services/clinicService';
 import { userService } from '../../services/userService';
 import { useToast } from '../../context/ToastContext';
+import { useAuth } from '../../context/AuthContext';
 import { formatDoctorRank } from '../../utils/doctorRank';
 import AppointmentDetailModal from './AppointmentDetailModal';
+import WalkInModal from './WalkInModal';
 
 const VALID_STATUSES = ['CONFIRMED', 'EXAMINING', 'COMPLETED'];
 
@@ -45,6 +47,8 @@ export default function SessionDetail() {
   const navigate = useNavigate();
   const location = useLocation();
   const toast = useToast();
+  const { role } = useAuth();
+  const isAdmin = role === 'ADMIN';
 
   const [session, setSession] = useState(location.state?.session || null);
   const [appointments, setAppointments] = useState([]);
@@ -53,6 +57,7 @@ export default function SessionDetail() {
   const [viewLayout, setViewLayout] = useState('board'); // 'board' (3 cột) | 'tabs' (chuyển tab)
   const [activeTab, setActiveTab] = useState('CONFIRMED');
   const [selectedAppointmentId, setSelectedAppointmentId] = useState(null);
+  const [showWalkInModal, setShowWalkInModal] = useState(false);
 
   useEffect(() => {
     // Fallback load tên bệnh nhân nếu backend chưa kịp gắn patientName
@@ -346,6 +351,26 @@ export default function SessionDetail() {
               <RefreshCw size={14} className={loading ? 'spin-slow' : ''} />
               <span>Làm mới</span>
             </button>
+
+            {isAdmin && session?.status === 'OPEN' && (
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => setShowWalkInModal(true)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)',
+                  borderColor: '#059669',
+                  fontWeight: 700,
+                  boxShadow: '0 2px 6px rgba(16, 185, 129, 0.25)',
+                }}
+              >
+                <UserPlus size={15} />
+                <span>Tiếp nhận tại quầy</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -417,6 +442,27 @@ export default function SessionDetail() {
           <p style={{ color: 'var(--gray-500)', fontSize: '0.875rem', maxWidth: 450, margin: '0 auto' }}>
             Hiện chưa có bệnh nhân nào ở trạng thái ĐÃ XÁC NHẬN, ĐANG KHÁM hoặc ĐÃ HOÀN TẤT trong ca khám này.
           </p>
+          {isAdmin && session?.status === 'OPEN' && (
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => setShowWalkInModal(true)}
+              style={{
+                marginTop: 18,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)',
+                borderColor: '#059669',
+                fontWeight: 700,
+                padding: '8px 20px',
+                boxShadow: '0 2px 6px rgba(16, 185, 129, 0.25)',
+              }}
+            >
+              <UserPlus size={16} />
+              <span>Tiếp nhận bệnh nhân tại quầy</span>
+            </button>
+          )}
         </div>
       ) : (
         <>
@@ -719,6 +765,18 @@ export default function SessionDetail() {
           appointmentId={selectedAppointmentId}
           onClose={() => setSelectedAppointmentId(null)}
           onRefreshParent={loadData}
+        />
+      )}
+
+      {/* Walk-in Registration Modal (Tiếp nhận tại quầy) */}
+      {showWalkInModal && (
+        <WalkInModal
+          session={session}
+          onClose={() => setShowWalkInModal(false)}
+          onSuccess={() => {
+            setShowWalkInModal(false);
+            loadData();
+          }}
         />
       )}
     </div>

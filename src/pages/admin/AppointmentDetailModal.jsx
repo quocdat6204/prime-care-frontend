@@ -3,7 +3,7 @@ import {
   X, Calendar, Clock, User, Stethoscope, FileText, Pill, Receipt,
   Upload, ExternalLink, CheckCircle2, AlertCircle, RefreshCw, Eye,
   CreditCard, Loader, ChevronRight, FileCheck, AlertTriangle, Play,
-  Plus, Trash2, Phone, Mail, MapPin, UserCheck
+  Plus, Trash2, Phone, Mail, MapPin, UserCheck, Banknote
 } from 'lucide-react';
 import { clinicService } from '../../services/clinicService';
 import { paymentService } from '../../services/paymentService';
@@ -41,7 +41,7 @@ const invoiceStatusMap = {
 
 export default function AppointmentDetailModal({ appointmentId, onClose, onRefreshParent, zIndex = 1300 }) {
   const toast = useToast();
-  const { role } = useAuth();
+  const { role, user } = useAuth();
   const isDoctor = role === 'DOCTOR';
   const isAdmin = role === 'ADMIN';
 
@@ -58,7 +58,7 @@ export default function AppointmentDetailModal({ appointmentId, onClose, onRefre
   const [startingAppointment, setStartingAppointment] = useState(false);
   const [cancellingServiceId, setCancellingServiceId] = useState(null);
   
-  // Starting service state (Admin)
+  // Starting service state (Admin / Doctor)
   const [startingServiceId, setStartingServiceId] = useState(null);
 
   // Upload PDF state (Admin)
@@ -72,10 +72,32 @@ export default function AppointmentDetailModal({ appointmentId, onClose, onRefre
   // View transactions of an invoice
   const [selectedInvoice, setSelectedInvoice] = useState(null);
 
+  // Cash payment state (Admin)
+  const [showCashPaymentModal, setShowCashPaymentModal] = useState(false);
+  const [payingCash, setPayingCash] = useState(false);
+  const [reconciling, setReconciling] = useState(false);
+
   const apt = detail?.appointment || {};
   const session = detail?.session || {};
   const services = detail?.services || [];
   const medications = detail?.medications || [];
+
+  // Lọc các dịch vụ đã chỉ định nhưng chưa thanh toán
+  const unpaidServices = services.filter((s) => s.status === 'ORDERED' && !s.paidAt);
+  const totalUnpaidAmount = unpaidServices.reduce((sum, s) => sum + (Number(s.unitPrice) || 0), 0);
+
+  // Bác sĩ phụ trách ca khám
+  const isAssignedDoctor = isDoctor && (
+    (session?.doctorId != null && String(user?.id) === String(session?.doctorId)) ||
+    (apt?.doctorId != null && String(user?.id) === String(apt?.doctorId)) ||
+    !session?.doctorId
+  );
+
+  // Quyền quản lý thủ thuật nha khoa / điều trị tại chỗ (DENTAL, OTHER): Bác sĩ phụ trách hoặc Admin
+  const canManageProcedure = (isAssignedDoctor || isAdmin) && apt?.status === 'EXAMINING';
+
+  // Quyền quản lý cận lâm sàng (LAB_TEST, IMAGING): Chỉ Admin / Kỹ thuật viên
+  const canManageParaclinical = isAdmin && apt?.status === 'EXAMINING';
 
   const fetchDetail = async () => {
     if (!appointmentId) return;
@@ -150,7 +172,11 @@ export default function AppointmentDetailModal({ appointmentId, onClose, onRefre
     setStartingServiceId(service.id);
     try {
       await clinicService.startAppointmentService(service.id);
-      toast.success(`Dịch vụ "${service.serviceName}" đã chuyển sang trạng thái Đang thực hiện (IN_PROGRESS)!`);
+      toast.success(
+        isLabOrImaging(service)
+          ? `Dịch vụ "${service.serviceName}" đã chuyển sang trạng thái Đang thực hiện!`
+          : `Bác sĩ đã bắt đầu thực hiện thủ thuật "${service.serviceName}"!`
+      );
       fetchDetail();
       onRefreshParent?.();
     } catch (err) {
@@ -190,6 +216,58 @@ export default function AppointmentDetailModal({ appointmentId, onClose, onRefre
       toast.error(getErrorMessage(err, 'Không thể hủy chỉ định dịch vụ này'));
     } finally {
       setCancellingServiceId(null);
+    }
+  };
+
+  // Quản trị viên thu tiền mặt tại quầy cho các dịch vụ chỉ định
+  const handleConfirmCashPayment = async () => {
+    if (unpaidServices.length === 0) {
+      toast.warning('Không có dịch vụ nào cần thanh toán.');
+      return;
+    }
+    setPayingCash(true);
+    try {
+      await paymentService.payWithCash({
+        appointmentId: apt.id,
+        type: 'SERVICES',
+        serviceItemIds: unpaidServices.map((s) => s.id),
+      });
+      toast.success(
+        `Đã thu tiền mặt thành công ${Number(totalUnpaidAmount).toLocaleString('vi-VN')} đ cho ${unpaidServices.length} dịch vụ!`
+      );
+      setShowCashPaymentModal(false);
+      fetchDetail();
+      fetchInvoices();
+      onRefreshParent?.();
+      setTimeout(() => {
+        fetchDetail();
+        fetchInvoices();
+        onRefreshParent?.();
+      }, 500);
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Thanh toán tiền mặt thất bại. Vui lòng kiểm tra lại!'));
+    } finally {
+      setPayingCash(false);
+    }
+  };
+
+  // Đồng bộ bù hóa đơn tiền mặt cho phí khám nếu trước đó payment-service bị gián đoạn
+  const handleReconcileInvoice = async () => {
+    setReconciling(true);
+    try {
+      const res = await clinicService.reconcileCashInvoice(appointmentId);
+      if (res.data?.result) {
+        toast.success(`Đã đồng bộ bù hóa đơn tiền mặt thành công! (Mã HĐ: #${res.data.result})`);
+        await fetchDetail();
+        await fetchInvoices();
+        onRefreshParent?.();
+      } else {
+        toast.info('Lịch hẹn này không có phí khám hoặc đã có hóa đơn rồi.');
+      }
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Đồng bộ hóa đơn thất bại. Hệ thống sẽ tự động quét và thử lại sau.'));
+    } finally {
+      setReconciling(false);
     }
   };
 
@@ -696,8 +774,8 @@ export default function AppointmentDetailModal({ appointmentId, onClose, onRefre
                         <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700 }}>Danh sách dịch vụ cận lâm sàng / thủ thuật</h3>
                         <p style={{ margin: '3px 0 0', fontSize: '0.8rem', color: 'var(--gray-500)' }}>
                           {isDoctor
-                            ? 'Bác sĩ chỉ định dịch vụ cho bệnh nhân và theo dõi kết quả sau khi phòng xét nghiệm / chẩn đoán hình ảnh hoàn tất'
-                            : <>Tải lên file PDF kết quả điều trị hoặc chụp chiếu (lưu trữ tự động vào folder <code>results</code> trên Supabase)</>}
+                            ? 'Bác sĩ trực tiếp thực hiện các thủ thuật nha khoa tại chỗ và theo dõi kết quả cận lâm sàng do phòng xét nghiệm gửi về'
+                            : <>Tiếp nhận và tải file kết quả cận lâm sàng (PDF) hoặc hỗ trợ quản lý thủ thuật điều trị</>}
                         </p>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -725,6 +803,70 @@ export default function AppointmentDetailModal({ appointmentId, onClose, onRefre
                         </button>
                       </div>
                     </div>
+
+                    {/* Banner nhắc thu tiền mặt cho Admin khi có dịch vụ chưa thanh toán */}
+                    {isAdmin && unpaidServices.length > 0 && apt?.status === 'EXAMINING' && (
+                      <div
+                        style={{
+                          marginBottom: 16,
+                          padding: '14px 18px',
+                          background: 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)',
+                          border: '1.5px solid #86efac',
+                          borderRadius: 12,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          flexWrap: 'wrap',
+                          gap: 12,
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <div
+                            style={{
+                              width: 40,
+                              height: 40,
+                              borderRadius: 10,
+                              background: '#bbf7d0',
+                              color: '#15803d',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              flexShrink: 0,
+                            }}
+                          >
+                            <Banknote size={22} />
+                          </div>
+                          <div>
+                            <div style={{ fontWeight: 700, color: '#166534', fontSize: '0.92rem' }}>
+                              Có {unpaidServices.length} dịch vụ chỉ định chưa thanh toán
+                            </div>
+                            <div style={{ fontSize: '0.82rem', color: '#15803d', marginTop: 2 }}>
+                              Tổng tiền mặt cần thu: <strong style={{ color: '#14532d', fontSize: '1.05rem', fontWeight: 800 }}>{totalUnpaidAmount.toLocaleString('vi-VN')} đ</strong>
+                            </div>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          onClick={() => setShowCashPaymentModal(true)}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            background: '#16a34a',
+                            borderColor: '#16a34a',
+                            color: '#ffffff',
+                            fontWeight: 700,
+                            padding: '8px 16px',
+                            boxShadow: '0 2px 4px rgba(22, 163, 74, 0.25)',
+                          }}
+                        >
+                          <Banknote size={15} />
+                          <span>Thu tiền mặt tại quầy</span>
+                        </button>
+                      </div>
+                    )}
 
                     {services.length === 0 ? (
                       <div style={{ padding: 40, textAlign: 'center', background: '#f8fafc', borderRadius: 12, border: '1px dashed #cbd5e1' }}>
@@ -827,15 +969,15 @@ export default function AppointmentDetailModal({ appointmentId, onClose, onRefre
                                     {srv.status === 'CANCELLED'
                                       ? 'Dịch vụ đã hủy'
                                       : srv.status === 'ORDERED'
-                                      ? 'Chờ bắt đầu thực hiện'
+                                      ? (isLabOrImaging(srv) ? 'Chờ phòng xét nghiệm tiếp nhận' : 'Chờ bắt đầu thực hiện')
                                       : srv.status === 'IN_PROGRESS'
-                                      ? 'Đang thực hiện (chờ hoàn tất)'
+                                      ? (isLabOrImaging(srv) ? 'Đang xét nghiệm/chụp chiếu' : 'Đang thực hiện thủ thuật')
                                       : 'Chưa có kết quả'}
                                   </span>
                                 )}
 
-                                {/* BÁC SĨ: Hủy chỉ định dịch vụ (nếu chưa thanh toán) */}
-                                {isDoctor && apt?.status === 'EXAMINING' && srv.status === 'ORDERED' && !srv.paidAt && (
+                                {/* Hủy chỉ định dịch vụ (nếu chưa thanh toán) */}
+                                {(isDoctor || isAdmin) && apt?.status === 'EXAMINING' && srv.status === 'ORDERED' && !srv.paidAt && (
                                   <button
                                     type="button"
                                     className="btn btn-sm btn-ghost"
@@ -849,10 +991,10 @@ export default function AppointmentDetailModal({ appointmentId, onClose, onRefre
                                   </button>
                                 )}
 
-                                {/* QUẢN TRỊ VIÊN / KỸ THUẬT VIÊN: Bắt đầu, hoàn tất và tải kết quả PDF */}
-                                {isAdmin && apt?.status === 'EXAMINING' && (
+                                {/* 1. DỊCH VỤ CẬN LÂM SÀNG (LAB_TEST, IMAGING): Dành cho ADMIN / Kỹ thuật viên */}
+                                {isLabOrImaging(srv) && canManageParaclinical && (
                                   <>
-                                    {/* Nút 1: Bắt đầu thực hiện (ORDERED -> IN_PROGRESS) */}
+                                    {/* Nút 1: Tiếp nhận xét nghiệm / chụp (ORDERED -> IN_PROGRESS) */}
                                     {srv.status === 'ORDERED' && (
                                       <button
                                         type="button"
@@ -861,8 +1003,8 @@ export default function AppointmentDetailModal({ appointmentId, onClose, onRefre
                                         disabled={startingServiceId === srv.id || !srv.paidAt}
                                         title={
                                           !srv.paidAt
-                                            ? 'Dịch vụ chưa được thanh toán! Bệnh nhân cần thanh toán hóa đơn dịch vụ trước khi tiếp nhận.'
-                                            : 'Tiếp nhận và bắt đầu thực hiện dịch vụ (chuyển sang IN_PROGRESS)'
+                                            ? 'Dịch vụ chưa được thanh toán! Bệnh nhân cần thanh toán hóa đơn trước khi tiếp nhận.'
+                                            : 'Tiếp nhận và bắt đầu thực hiện xét nghiệm/chụp chiếu (IN_PROGRESS)'
                                         }
                                         style={{
                                           display: 'inline-flex',
@@ -883,122 +1025,168 @@ export default function AppointmentDetailModal({ appointmentId, onClose, onRefre
                                         )}
                                         <span>
                                           {startingServiceId === srv.id
-                                            ? 'Đang bắt đầu...'
+                                            ? 'Đang tiếp nhận...'
                                             : !srv.paidAt
                                             ? 'Chưa thanh toán'
-                                            : 'Bắt đầu thực hiện'}
+                                            : 'Tiếp nhận thực hiện'}
                                         </span>
                                       </button>
                                     )}
 
-                                    {/* Nút 2: Hoàn tất dịch vụ (IN_PROGRESS -> COMPLETED) */}
+                                    {/* Nút 2: Tải file kết quả PDF (IN_PROGRESS -> COMPLETED) */}
                                     {srv.status === 'IN_PROGRESS' && (
-                                      isLabOrImaging(srv) ? (
-                                        <button
-                                          type="button"
-                                          className="btn btn-sm btn-outline"
-                                          onClick={() => handleTriggerUpload(srv)}
-                                          disabled={isUploading}
-                                          title="Tải lên file kết quả PDF lên Supabase Storage và hoàn tất dịch vụ"
-                                          style={{
-                                            display: 'inline-flex',
-                                            alignItems: 'center',
-                                            gap: 6,
-                                            borderColor: '#c4b5fd',
-                                            color: '#6d28d9',
-                                            background: '#faf5ff',
-                                            fontWeight: 600,
-                                            padding: '7px 12px',
-                                            cursor: isUploading ? 'not-allowed' : 'pointer',
-                                          }}
-                                        >
-                                          {isUploading ? (
-                                            <Loader size={14} className="spin-slow" />
-                                          ) : (
-                                            <Upload size={14} />
-                                          )}
-                                          <span>{isUploading ? 'Đang tải...' : 'Tải lên PDF'}</span>
-                                        </button>
-                                      ) : (
-                                        <button
-                                          type="button"
-                                          className="btn btn-sm"
-                                          onClick={() => handleTriggerCompleteProcedure(srv)}
-                                          disabled={isUploading}
-                                          title="Ghi nhận hoàn tất thủ thuật điều trị (không bắt buộc tải file PDF)"
-                                          style={{
-                                            display: 'inline-flex',
-                                            alignItems: 'center',
-                                            gap: 6,
-                                            borderColor: '#86efac',
-                                            color: '#15803d',
-                                            background: '#f0fdf4',
-                                            fontWeight: 600,
-                                            padding: '7px 12px',
-                                            cursor: isUploading ? 'not-allowed' : 'pointer',
-                                          }}
-                                        >
-                                          {isUploading ? (
-                                            <Loader size={14} className="spin-slow" />
-                                          ) : (
-                                            <CheckCircle2 size={14} />
-                                          )}
-                                          <span>{isUploading ? 'Đang lưu...' : 'Hoàn tất dịch vụ'}</span>
-                                        </button>
-                                      )
+                                      <button
+                                        type="button"
+                                        className="btn btn-sm btn-outline"
+                                        onClick={() => handleTriggerUpload(srv)}
+                                        disabled={isUploading}
+                                        title="Tải lên file kết quả PDF lên Supabase Storage và hoàn tất dịch vụ"
+                                        style={{
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: 6,
+                                          borderColor: '#c4b5fd',
+                                          color: '#6d28d9',
+                                          background: '#faf5ff',
+                                          fontWeight: 600,
+                                          padding: '7px 12px',
+                                          cursor: isUploading ? 'not-allowed' : 'pointer',
+                                        }}
+                                      >
+                                        {isUploading ? (
+                                          <Loader size={14} className="spin-slow" />
+                                        ) : (
+                                          <Upload size={14} />
+                                        )}
+                                        <span>{isUploading ? 'Đang tải...' : 'Tải lên PDF'}</span>
+                                      </button>
                                     )}
 
-                                    {/* Nút 3: Cập nhật lại kết quả khi đã COMPLETED */}
+                                    {/* Nút 3: Tải lại file PDF mới khi đã COMPLETED */}
                                     {srv.status === 'COMPLETED' && (
-                                      isLabOrImaging(srv) ? (
-                                        <button
-                                          type="button"
-                                          className="btn btn-sm btn-outline"
-                                          onClick={() => handleTriggerUpload(srv)}
-                                          disabled={isUploading}
-                                          title="Tải lại file kết quả PDF mới lên Supabase Storage để cập nhật kết quả"
-                                          style={{
-                                            display: 'inline-flex',
-                                            alignItems: 'center',
-                                            gap: 6,
-                                            borderColor: '#cbd5e1',
-                                            color: '#475569',
-                                            background: '#f8fafc',
-                                            fontWeight: 600,
-                                            padding: '7px 12px',
-                                            cursor: isUploading ? 'not-allowed' : 'pointer',
-                                          }}
-                                        >
-                                          {isUploading ? (
-                                            <Loader size={14} className="spin-slow" />
-                                          ) : (
-                                            <Upload size={14} />
-                                          )}
-                                          <span>{isUploading ? 'Đang tải...' : 'Tải lại PDF'}</span>
-                                        </button>
-                                      ) : (
-                                        <button
-                                          type="button"
-                                          className="btn btn-sm btn-outline"
-                                          onClick={() => handleTriggerCompleteProcedure(srv)}
-                                          disabled={isUploading}
-                                          title="Cập nhật ghi chú thủ thuật hoặc bổ sung file đính kèm"
-                                          style={{
-                                            display: 'inline-flex',
-                                            alignItems: 'center',
-                                            gap: 6,
-                                            borderColor: '#cbd5e1',
-                                            color: '#475569',
-                                            background: '#f8fafc',
-                                            fontWeight: 600,
-                                            padding: '7px 12px',
-                                            cursor: isUploading ? 'not-allowed' : 'pointer',
-                                          }}
-                                        >
-                                          <FileText size={14} />
-                                          <span>Cập nhật ghi chú</span>
-                                        </button>
-                                      )
+                                      <button
+                                        type="button"
+                                        className="btn btn-sm btn-outline"
+                                        onClick={() => handleTriggerUpload(srv)}
+                                        disabled={isUploading}
+                                        title="Tải lại file kết quả PDF mới lên Supabase Storage để cập nhật kết quả"
+                                        style={{
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: 6,
+                                          borderColor: '#cbd5e1',
+                                          color: '#475569',
+                                          background: '#f8fafc',
+                                          fontWeight: 600,
+                                          padding: '7px 12px',
+                                          cursor: isUploading ? 'not-allowed' : 'pointer',
+                                        }}
+                                      >
+                                        {isUploading ? (
+                                          <Loader size={14} className="spin-slow" />
+                                        ) : (
+                                          <Upload size={14} />
+                                        )}
+                                        <span>{isUploading ? 'Đang tải...' : 'Tải lại PDF'}</span>
+                                      </button>
+                                    )}
+                                  </>
+                                )}
+
+                                {/* 2. DỊCH VỤ THỦ THUẬT / NHA KHOA ĐIỀU TRỊ (DENTAL, OTHER): Bác sĩ phụ trách hoặc Admin */}
+                                {!isLabOrImaging(srv) && canManageProcedure && (
+                                  <>
+                                    {/* Nút 1: Bắt đầu thủ thuật (ORDERED -> IN_PROGRESS) */}
+                                    {srv.status === 'ORDERED' && (
+                                      <button
+                                        type="button"
+                                        className="btn btn-sm"
+                                        onClick={() => handleStartService(srv)}
+                                        disabled={startingServiceId === srv.id || !srv.paidAt}
+                                        title={
+                                          !srv.paidAt
+                                            ? 'Dịch vụ chưa được thanh toán! Bệnh nhân cần thanh toán trước khi tiến hành thủ thuật.'
+                                            : 'Bác sĩ bắt đầu thực hiện thủ thuật điều trị'
+                                        }
+                                        style={{
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: 6,
+                                          background: !srv.paidAt ? '#f1f5f9' : '#f0fdf4',
+                                          color: !srv.paidAt ? '#94a3b8' : '#15803d',
+                                          borderColor: !srv.paidAt ? '#e2e8f0' : '#86efac',
+                                          fontWeight: 700,
+                                          padding: '7px 12px',
+                                          cursor: startingServiceId === srv.id || !srv.paidAt ? 'not-allowed' : 'pointer',
+                                        }}
+                                      >
+                                        {startingServiceId === srv.id ? (
+                                          <Loader size={14} className="spin-slow" />
+                                        ) : (
+                                          <Play size={14} />
+                                        )}
+                                        <span>
+                                          {startingServiceId === srv.id
+                                            ? 'Đang bắt đầu...'
+                                            : !srv.paidAt
+                                            ? 'Chưa thanh toán'
+                                            : 'Bắt đầu thủ thuật'}
+                                        </span>
+                                      </button>
+                                    )}
+
+                                    {/* Nút 2: Hoàn tất thủ thuật (IN_PROGRESS -> COMPLETED) */}
+                                    {srv.status === 'IN_PROGRESS' && (
+                                      <button
+                                        type="button"
+                                        className="btn btn-sm"
+                                        onClick={() => handleTriggerCompleteProcedure(srv)}
+                                        disabled={isUploading}
+                                        title="Hoàn tất thủ thuật điều trị và nhập ghi chú lâm sàng (không bắt buộc tải PDF)"
+                                        style={{
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: 6,
+                                          borderColor: '#86efac',
+                                          color: '#15803d',
+                                          background: '#f0fdf4',
+                                          fontWeight: 700,
+                                          padding: '7px 12px',
+                                          cursor: isUploading ? 'not-allowed' : 'pointer',
+                                        }}
+                                      >
+                                        {isUploading ? (
+                                          <Loader size={14} className="spin-slow" />
+                                        ) : (
+                                          <CheckCircle2 size={14} />
+                                        )}
+                                        <span>{isUploading ? 'Đang lưu...' : 'Hoàn tất thủ thuật'}</span>
+                                      </button>
+                                    )}
+
+                                    {/* Nút 3: Cập nhật ghi chú khi đã COMPLETED */}
+                                    {srv.status === 'COMPLETED' && (
+                                      <button
+                                        type="button"
+                                        className="btn btn-sm btn-outline"
+                                        onClick={() => handleTriggerCompleteProcedure(srv)}
+                                        disabled={isUploading}
+                                        title="Cập nhật ghi chú thủ thuật hoặc bổ sung file đính kèm nếu có"
+                                        style={{
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: 6,
+                                          borderColor: '#cbd5e1',
+                                          color: '#475569',
+                                          background: '#f8fafc',
+                                          fontWeight: 600,
+                                          padding: '7px 12px',
+                                          cursor: isUploading ? 'not-allowed' : 'pointer',
+                                        }}
+                                      >
+                                        <FileText size={14} />
+                                        <span>Cập nhật ghi chú</span>
+                                      </button>
                                     )}
                                   </>
                                 )}
@@ -1126,6 +1314,50 @@ export default function AppointmentDetailModal({ appointmentId, onClose, onRefre
                         <span>Làm mới</span>
                       </button>
                     </div>
+
+                    {/* Banner cảnh báo hóa đơn phí khám chưa được đồng bộ (nếu trước đó payment-service down) */}
+                    {isAdmin && Number(apt?.examinationFee || 0) > 0 && !apt?.examinationInvoiceId && (
+                      <div
+                        style={{
+                          padding: '12px 16px',
+                          borderRadius: 12,
+                          background: '#fffbeb',
+                          border: '1px solid #fde68a',
+                          marginBottom: 16,
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          gap: 12,
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <AlertTriangle size={18} color="#d97706" style={{ flexShrink: 0 }} />
+                          <div style={{ fontSize: '0.825rem', color: '#92400e' }}>
+                            <strong>Phí khám ({Number(apt.examinationFee).toLocaleString('vi-VN')} đ)</strong> chưa có mã hóa đơn do kết nối tới payment-service bị gián đoạn trước đó. Background Job đang tự động quét để bù hóa đơn.
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-primary"
+                          onClick={handleReconcileInvoice}
+                          disabled={reconciling}
+                          style={{
+                            fontSize: '0.78rem',
+                            padding: '4px 12px',
+                            whiteSpace: 'nowrap',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            background: '#d97706',
+                            borderColor: '#d97706',
+                            fontWeight: 700,
+                          }}
+                        >
+                          <RefreshCw size={13} className={reconciling ? 'spin-slow' : ''} />
+                          <span>Đồng bộ bù ngay</span>
+                        </button>
+                      </div>
+                    )}
 
                     {loadingInvoices ? (
                       <div style={{ padding: 40, textAlign: 'center' }}>
@@ -1467,6 +1699,183 @@ export default function AppointmentDetailModal({ appointmentId, onClose, onRefre
             onRefreshParent?.();
           }}
         />
+      )}
+
+      {/* Admin Modal: Xác nhận thu tiền mặt tại quầy */}
+      {showCashPaymentModal && (
+        <div className="modal-overlay" onClick={() => !payingCash && setShowCashPaymentModal(false)} style={{ zIndex: zIndex + 60 }}>
+          <div
+            className="modal-content"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: 540, borderRadius: 16, overflow: 'hidden', padding: 0 }}
+          >
+            <div
+              className="modal-header"
+              style={{
+                padding: '16px 20px',
+                background: 'linear-gradient(135deg, #15803d 0%, #16a34a 100%)',
+                color: '#fff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ background: 'rgba(255,255,255,0.2)', padding: 7, borderRadius: 8, display: 'flex' }}>
+                  <Banknote size={20} color="#fff" />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: '#fff' }}>
+                    Thu tiền mặt tại quầy
+                  </h3>
+                  <p style={{ margin: '2px 0 0', fontSize: '0.78rem', color: 'rgba(255,255,255,0.85)' }}>
+                    Xác nhận đã nhận tiền mặt từ bệnh nhân để kích hoạt dịch vụ
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-icon btn-ghost"
+                onClick={() => setShowCashPaymentModal(false)}
+                disabled={payingCash}
+                style={{ color: '#fff' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="modal-body" style={{ padding: '20px 24px' }}>
+              {/* Thông tin bệnh nhân */}
+              <div
+                style={{
+                  padding: '12px 16px',
+                  background: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: 10,
+                  marginBottom: 16,
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--gray-500)' }}>Bệnh nhân</div>
+                  <div style={{ fontWeight: 700, color: 'var(--gray-900)', fontSize: '0.95rem' }}>
+                    {apt.patientName || 'Chưa cập nhật'}
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--gray-500)' }}>Mã lịch hẹn</div>
+                  <div style={{ fontWeight: 700, color: '#2563eb', fontSize: '0.95rem' }}>
+                    #{apt.id}
+                  </div>
+                </div>
+              </div>
+
+              {/* Danh sách dịch vụ thanh toán */}
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--gray-700)', marginBottom: 8 }}>
+                  Danh sách dịch vụ cần thu tiền ({unpaidServices.length}):
+                </div>
+                <div
+                  style={{
+                    maxHeight: 180,
+                    overflowY: 'auto',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: 10,
+                    padding: '8px 12px',
+                    background: '#ffffff',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 8,
+                  }}
+                >
+                  {unpaidServices.map((srv, idx) => (
+                    <div
+                      key={srv.id || idx}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        fontSize: '0.85rem',
+                        paddingBottom: idx !== unpaidServices.length - 1 ? 6 : 0,
+                        borderBottom: idx !== unpaidServices.length - 1 ? '1px dashed #f1f5f9' : 'none',
+                      }}
+                    >
+                      <div>
+                        <span style={{ fontWeight: 600, color: 'var(--gray-800)' }}>{srv.serviceName}</span>
+                        <span style={{ fontSize: '0.72rem', color: 'var(--gray-500)', marginLeft: 6 }}>({srv.serviceType})</span>
+                      </div>
+                      <span style={{ fontWeight: 700, color: 'var(--gray-900)' }}>
+                        {Number(srv.unitPrice || 0).toLocaleString('vi-VN')} đ
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Tổng tiền cần thu */}
+              <div
+                style={{
+                  padding: '16px',
+                  background: 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)',
+                  border: '1.5px solid #86efac',
+                  borderRadius: 12,
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
+              >
+                <div>
+                  <span style={{ fontSize: '0.85rem', color: '#166534', fontWeight: 600 }}>Tổng tiền mặt cần thu:</span>
+                  <div style={{ fontSize: '0.75rem', color: '#15803d', marginTop: 2 }}>
+                    Phương thức: <strong>Tiền mặt tại quầy (CASH)</strong>
+                  </div>
+                </div>
+                <div style={{ fontSize: '1.4rem', fontWeight: 900, color: '#15803d' }}>
+                  {totalUnpaidAmount.toLocaleString('vi-VN')} đ
+                </div>
+              </div>
+            </div>
+
+            <div className="modal-footer" style={{ padding: '14px 20px', display: 'flex', justifyContent: 'flex-end', gap: 10, background: '#f8fafc', borderTop: '1px solid #e2e8f0' }}>
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={() => setShowCashPaymentModal(false)}
+                disabled={payingCash}
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleConfirmCashPayment}
+                disabled={payingCash}
+                style={{
+                  background: '#16a34a',
+                  borderColor: '#16a34a',
+                  fontWeight: 700,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 8,
+                }}
+              >
+                {payingCash ? (
+                  <>
+                    <Loader size={16} className="spin-slow" />
+                    <span>Đang ghi nhận thu tiền...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 size={16} />
+                    <span>Xác nhận đã nhận {totalUnpaidAmount.toLocaleString('vi-VN')} đ</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

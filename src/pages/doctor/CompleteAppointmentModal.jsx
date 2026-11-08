@@ -133,7 +133,7 @@ export default function CompleteAppointmentModal({ appointmentId, appointment, s
 
     if (incompleteServices.length > 0) {
       toast.error(
-        `Còn ${incompleteServices.length} dịch vụ cận lâm sàng chưa hoàn tất hoặc chưa thanh toán. Vui lòng hoàn tất hoặc hủy trước khi chốt buổi khám!`
+        `Còn ${incompleteServices.length} dịch vụ/thủ thuật chưa hoàn tất hoặc chưa thanh toán. Vui lòng hoàn tất hoặc hủy trước khi chốt buổi khám!`
       );
       return;
     }
@@ -234,7 +234,7 @@ export default function CompleteAppointmentModal({ appointmentId, appointment, s
             >
               <AlertTriangle size={18} style={{ flexShrink: 0 }} />
               <div>
-                <strong>Lưu ý quan trọng:</strong> Ca khám này còn <strong>{incompleteServices.length}</strong> dịch vụ cận lâm sàng chưa hoàn tất hoặc chưa thanh toán ({incompleteServices.map((s) => s.serviceName).join(', ')}). Bác sĩ cần chờ phòng xét nghiệm/chụp chiếu gửi kết quả hoặc hủy dịch vụ chưa làm trước khi chốt ca.
+                <strong>Lưu ý quan trọng:</strong> Ca khám này còn <strong>{incompleteServices.length}</strong> dịch vụ / thủ thuật chưa hoàn tất hoặc chưa thanh toán ({incompleteServices.map((s) => s.serviceName).join(', ')}). Bác sĩ cần hoàn tất thủ thuật, chờ phòng xét nghiệm/chụp chiếu gửi kết quả hoặc hủy dịch vụ chưa làm trước khi chốt ca.
               </div>
             </div>
           )}

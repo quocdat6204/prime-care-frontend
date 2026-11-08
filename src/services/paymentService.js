@@ -10,6 +10,14 @@ export const paymentService = {
   },
 
   /**
+   * Thu tiền mặt tại quầy cho các dịch vụ chỉ định (Dành cho ADMIN)
+   * @param {Object} data - { appointmentId, type: 'SERVICES', serviceItemIds }
+   */
+  payWithCash(data) {
+    return api.post('/api/vnpay/cash-payment', data);
+  },
+
+  /**
    * Xử lý kết quả trả về từ VNPay (nếu gọi từ Frontend)
    * @param {Object} params
    */

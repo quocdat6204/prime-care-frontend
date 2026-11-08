@@ -43,6 +43,14 @@ export const clinicService = {
     return api.post(`${CLINIC_BASE}/appointments`, data);
   },
 
+  walkInAppointment(sessionId, data) {
+    return api.post(`${CLINIC_BASE}/sessions/${sessionId}/walk-in`, data);
+  },
+
+  reconcileCashInvoice(appointmentId) {
+    return api.post(`${CLINIC_BASE}/appointments/${appointmentId}/reconcile-invoice`);
+  },
+
   cancelAppointment(id) {
     return api.post(`${CLINIC_BASE}/appointments/${id}/cancel`);
   },
