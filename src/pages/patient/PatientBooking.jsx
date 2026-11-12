@@ -134,6 +134,21 @@ export default function PatientBooking() {
   const [bookedAppointment, setBookedAppointment] = useState(null);
   const [paying, setPaying] = useState(false);
 
+  // Đồng bộ lại khi URL đổi lúc đang ở sẵn trang này (ví dụ bấm nút "Đặt lịch hẹn" của chatbot):
+  // useState chỉ đọc tham số URL ở lần mở trang đầu tiên nên phải cập nhật thủ công.
+  useEffect(() => {
+    if (paramDoctorId) {
+      setBookingMode('BY_DOCTOR');
+      setSelectedDoctorId(Number(paramDoctorId));
+    } else if (paramDate) {
+      setBookingMode('BY_DATE');
+    }
+    if (paramDate) {
+      const day = fiveDays.find((d) => d.dateStr === paramDate);
+      if (day) setSelectedDay((prev) => (prev.dateStr === day.dateStr ? prev : day));
+    }
+  }, [paramDate, paramDoctorId]);
+
   // Lấy danh sách các ca khám bệnh nhân đã đặt và đang hoạt động
   const fetchMyActiveAppointments = async () => {
     try {
