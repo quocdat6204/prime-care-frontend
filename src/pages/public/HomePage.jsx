@@ -128,7 +128,7 @@ export default function HomePage({ onLoginClick, onRegisterClick }) {
   const faqs = [
     {
       q: 'Quy trình đặt lịch hẹn tại Primecare diễn ra như thế nào?',
-      a: 'Bạn chỉ cần nhấn vào nút "Đặt lịch hẹn" trên thanh điều hướng hoặc gọi Hotline (+084) 123 456 789. Hệ thống sẽ tự động xác nhận và sắp xếp bác sĩ phù hợp trong khung giờ bạn mong muốn.',
+      a: 'Bạn chỉ cần nhấn vào nút "Đặt lịch hẹn" trên thanh điều hướng hoặc gọi Hotline +84 123456789. Hệ thống sẽ tự động xác nhận và sắp xếp bác sĩ phù hợp trong khung giờ bạn mong muốn.',
     },
     {
       q: 'Khám và lấy cao răng tại nha khoa có bị đau hoặc chảy máu không?',
@@ -550,9 +550,9 @@ export default function HomePage({ onLoginClick, onRegisterClick }) {
                 <Calendar size={18} />
                 <span>Đặt Lịch Khám Miễn Phí</span>
               </button>
-              <a href="tel:+084123456789" className="btn-cta-phone">
+              <a href="tel:+84123456789" className="btn-cta-phone">
                 <PhoneCall size={18} />
-                <span>Hotline: (+084) 123 456 789</span>
+                <span>Hotline: +84 123456789</span>
               </a>
             </div>
           </div>

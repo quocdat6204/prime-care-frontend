@@ -87,7 +87,11 @@ api.interceptors.response.use(
           response.data.result;
 
         localStorage.setItem('accessToken', newAccess);
-        localStorage.setItem('refreshToken', newRefresh);
+        // API /authenticate/refresh chỉ trả accessToken (không trả refreshToken mới).
+        // Chỉ ghi đè khi có giá trị, nếu không localStorage sẽ lưu chuỗi "undefined" và lần làm mới sau sẽ thất bại -> bị đăng xuất.
+        if (newRefresh) {
+          localStorage.setItem('refreshToken', newRefresh);
+        }
 
         api.defaults.headers.common.Authorization = `Bearer ${newAccess}`;
         originalRequest.headers.Authorization = `Bearer ${newAccess}`;

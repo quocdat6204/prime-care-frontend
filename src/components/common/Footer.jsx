@@ -17,8 +17,8 @@ export default function Footer() {
           </div>
           <div className="footer-topbar-hotline">
             <span>Cấp cứu nha khoa 24/7: </span>
-            <a href="tel:+084123456789" className="hotline-highlight">
-              (+084) 123 456 789
+            <a href="tel:+84123456789" className="hotline-highlight">
+              +84 123456789
             </a>
           </div>
         </div>
@@ -87,7 +87,7 @@ export default function Footer() {
             <li>
               <Phone size={18} className="contact-icon" />
               <div>
-                <strong>Hotline:</strong> (+084) 123 456 789 (Hỗ trợ 24/7)
+                <strong>Hotline:</strong> +84 123456789 (Hỗ trợ 24/7)
               </div>
             </li>
             <li>

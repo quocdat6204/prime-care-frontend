@@ -164,13 +164,13 @@ export default function Navbar({ onLoginClick, onRegisterClick }) {
           {/* Right Section: Hotline, Booking CTA & Auth */}
           <div className="topbar-actions">
             {/* Phone Hotline */}
-            <a href="tel:+084123456789" className="topbar-hotline">
+            <a href="tel:+84123456789" className="topbar-hotline">
               <span className="hotline-icon-badge">
                 <Phone size={15} />
               </span>
               <span className="hotline-text">
                 <span className="hotline-label">Liên Hệ Ngay/</span>
-                <span className="hotline-number">(+084) 123 456 789</span>
+                <span className="hotline-number">+84 123456789</span>
               </span>
             </a>
 
@@ -262,9 +262,9 @@ export default function Navbar({ onLoginClick, onRegisterClick }) {
           {/* Mobile Extra Actions when drawer is open */}
           {menuOpen && (
             <div className="mobile-drawer-footer">
-              <a href="tel:+084123456789" className="mobile-hotline-link">
+              <a href="tel:+84123456789" className="mobile-hotline-link">
                 <Phone size={16} />
-                <span>Hotline: (+084) 123 456 789</span>
+                <span>Hotline: +84 123456789</span>
               </a>
               <button className="btn-prime-navy w-full" onClick={handleBookAppointment}>
                 <Calendar size={16} />

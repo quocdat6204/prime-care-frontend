@@ -102,6 +102,7 @@ export default function ChatbotWidget({ onOpenLogin }) {
         text: result?.reply || 'Dạ tôi đã ghi nhận câu hỏi, bạn có cần hỗ trợ thêm thông tin gì khác không ạ?',
         time: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
         suggestions: result?.suggestions || [],
+        actions: result?.actions || [],
       };
       setMessages((prev) => [...prev, botMsg]);
     } catch (err) {
@@ -302,7 +303,7 @@ export default function ChatbotWidget({ onOpenLogin }) {
                       borderRadius: 10,
                     }}
                   >
-                    GEMINI
+                    AI
                   </span>
                 </div>
                 <div style={{ fontSize: '0.74rem', color: '#ccfbf1', marginTop: 2 }}>
@@ -473,6 +474,37 @@ export default function ChatbotWidget({ onOpenLogin }) {
                     </div>
                   </div>
                 </div>
+
+                {/* Action buttons (vd: Đặt lịch khám) - chỉ cho phép đường dẫn nội bộ */}
+                {Array.isArray(m.actions) && m.actions.some((a) => typeof a?.url === 'string' && a.url.startsWith('/')) && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8, marginLeft: 36, maxWidth: '85%' }}>
+                    {m.actions
+                      .filter((a) => typeof a?.url === 'string' && a.url.startsWith('/'))
+                      .map((a, aIdx) => (
+                        <button
+                          key={aIdx}
+                          type="button"
+                          onClick={() => {
+                            setIsOpen(false);
+                            navigate(a.url);
+                          }}
+                          style={{
+                            background: '#0d9488',
+                            color: '#ffffff',
+                            border: 'none',
+                            borderRadius: 14,
+                            padding: '6px 14px',
+                            fontSize: '0.78rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            boxShadow: '0 2px 6px rgba(13,148,136,0.25)',
+                          }}
+                        >
+                          {a.label || 'Mở trang'}
+                        </button>
+                      ))}
+                  </div>
+                )}
 
                 {/* Suggestions Pills (if bot message has suggestions) */}
                 {m.suggestions && m.suggestions.length > 0 && (
