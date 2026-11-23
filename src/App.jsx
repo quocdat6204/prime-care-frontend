@@ -201,7 +201,7 @@ export default function App() {
           <Route
             path="/doctor/ai-diagnosis"
             element={
-              <ProtectedRoute allowedRoles={['DOCTOR', 'ADMIN']} onOpenLogin={openLogin}>
+              <ProtectedRoute allowedRoles={['DOCTOR']} onOpenLogin={openLogin}>
                 <DashboardLayout>
                   <DoctorAIDiagnosis />
                 </DashboardLayout>

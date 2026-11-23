@@ -1,652 +1,437 @@
-import { useState, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Sparkles, Upload, Image as ImageIcon, CheckCircle2, AlertCircle,
-  RefreshCw, Copy, Check, Info, FileText, ArrowRight, Zap, ShieldAlert,
-  Sliders, Activity
+  Sparkles, Upload, Image as ImageIcon, RefreshCw, Copy, Check, Info, Zap,
+  ShieldAlert, AlertTriangle, Download, Eye, EyeOff, Activity, Cpu,
 } from 'lucide-react';
 import { useToast } from '../../context/ToastContext';
+import { xrayService } from '../../services/xrayService';
+import { getErrorMessage } from '../../utils/errorMessage';
 
-// Dữ liệu mẫu minh họa kết quả khi AI phân tích
-const SAMPLE_PREVIEWS = [
-  {
-    id: 'sample-1',
-    name: 'Ảnh X-quang Răng hàm R46 (Sâu ngà sâu)',
-    url: 'https://images.unsplash.com/photo-1588776814546-1ffcf47267a5?auto=format&fit=crop&w=600&q=80',
-    mockResult: {
-      diseaseName: 'Sâu ngà răng sâu (Dental Caries - Deep Dentin)',
-      icdCode: 'K02.1',
-      confidence: 96.2,
-      severity: 'Nghiêm trọng (Cần can thiệp sớm)',
-      severityColor: '#dc2626',
-      severityBg: '#fee2e2',
-      description: 'Phát hiện vùng thấu quang lớn phá hủy men và xâm lấn sâu vào lớp ngà răng số 46, đáy lỗ sâu sát trần buồng tủy.',
-      differentials: [
-        { name: 'Sâu ngà sâu sát tủy', prob: 96.2 },
-        { name: 'Viêm tủy răng có hồi phục', prob: 84.5 },
-        { name: 'Viêm quanh cuống răng mạn tính', prob: 12.0 },
-      ],
-      recommendations: [
-        'Chụp phim cận chóp (Periapical X-ray) kiểm tra tình trạng chân răng và cuống răng.',
-        'Kiểm tra thử tủy (thử nhiệt / thử điện) để đánh giá độ sống của tủy.',
-        'Cân nhắc nạo sạch ngà mủn, hàn bảo tồn che tủy gián tiếp hoặc tiến hành điều trị tủy nếu có lộ tủy.',
-      ],
-    },
-  },
-  {
-    id: 'sample-2',
-    name: 'Ảnh X-quang Răng khôn R38 (Mọc lệch ngầm)',
-    url: 'https://images.unsplash.com/photo-1629909613654-28e377c37b09?auto=format&fit=crop&w=600&q=80',
-    mockResult: {
-      diseaseName: 'Răng khôn hàm dưới mọc lệch ngầm (Impacted Wisdom Tooth)',
-      icdCode: 'K01.1',
-      confidence: 98.5,
-      severity: 'Cần phẫu thuật nhổ răng',
-      severityColor: '#ea580c',
-      severityBg: '#ffedd5',
-      description: 'Răng số 38 mọc lệch gần góc 75 độ, tỳ trực tiếp vào cổ chân răng số 37, có nguy cơ gây tiêu xương ổ răng và sâu chân răng 37.',
-      differentials: [
-        { name: 'Răng khôn mọc lệch gần (Mesioangular)', prob: 98.5 },
-        { name: 'Nang thân răng (Dentigerous cyst)', prob: 18.2 },
-      ],
-      recommendations: [
-        'Chụp ConeBeam CT 3D khảo sát tương quan chân răng khôn với ống thần kinh răng dưới.',
-        'Chỉ định phẫu thuật nhổ răng khôn mọc lệch để bảo vệ răng hàm số 37.',
-        'Dùng kháng sinh và kháng viêm trước / sau tiểu phẫu nếu có dấu hiệu viêm lợi trùm.',
-      ],
-    },
-  },
-  {
-    id: 'sample-3',
-    name: 'Ảnh chụp khoang miệng (Viêm nướu & Cao răng độ III)',
-    url: 'https://images.unsplash.com/photo-1606811841689-23dfddce3e95?auto=format&fit=crop&w=600&q=80',
-    mockResult: {
-      diseaseName: 'Viêm nướu răng mạn tính kèm vôi răng dưới nướu (Chronic Gingivitis)',
-      icdCode: 'K05.1',
-      confidence: 93.8,
-      severity: 'Trung bình',
-      severityColor: '#d97706',
-      severityBg: '#fef3c7',
-      description: 'Mô nướu viền đỏ sưng nề, tụt lợi nhẹ vùng răng cửa hàm dưới, mảng bám vôi răng dưới nướu tích tụ dày.',
-      differentials: [
-        { name: 'Viêm nướu mạn tính mảng bám', prob: 93.8 },
-        { name: 'Viêm nha chu giai đoạn sớm', prob: 45.0 },
-      ],
-      recommendations: [
-        'Lấy cao răng siêu âm trên và dưới nướu toàn bộ hai hàm.',
-        'Bơm rửa túi lợi bằng dung dịch sát khuẩn Chlorhexidine 0.12%.',
-        'Hướng dẫn bệnh nhân kỹ thuật chải răng Bass cải tiến và dùng chỉ nha khoa hàng ngày.',
-      ],
-    },
-  },
+// Màu theo lớp; hai lớp bệnh lý dùng màu nóng để nổi bật
+const CLASS_COLORS = {
+  0: '#dc2626', // Viêm quanh chóp
+  1: '#f97316', // Sâu răng
+  2: '#3b82f6', // Răng khôn
+  3: '#8b5cf6', // Mất răng
+  4: '#14b8a6', // Miếng trám
+  5: '#22c55e', // Điều trị tủy
+  6: '#eab308', // Implant
+  7: '#ec4899', // Mão sứ
+  8: '#06b6d4', // Cầu răng sứ
+};
+const GROUP_LABELS = { pathology: 'Bệnh lý', structure: 'Cấu trúc', restoration: 'Phục hình' };
+const STRONG_SCORE = 0.5; // từ ngưỡng này vẽ nét liền; thấp hơn vẽ nét đứt "cần xem lại"
+const FALLBACK_MODELS = [
+  { name: 'v4_lite', label: 'Chính xác (v4_lite)', description: 'Độ chính xác cao nhất, chậm hơn một chút.', loaded: true },
+  { name: 'v3_fast', label: 'Nhanh (v3_fast)', description: 'Nhanh hơn, kém hơn chút ở sâu răng và viêm quanh chóp.', loaded: true },
 ];
+const MAX_MB = 10;
+
+const fmtScore = (s) => s.toFixed(2);
 
 export default function DoctorAIDiagnosis() {
   const toast = useToast();
   const fileInputRef = useRef(null);
 
-  // States
-  const [selectedFile, setSelectedFile] = useState(null);
+  const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState('');
+  const [models, setModels] = useState(FALLBACK_MODELS);
+  const [model, setModel] = useState('v4_lite');
   const [analyzing, setAnalyzing] = useState(false);
-  const [diagnosisResult, setDiagnosisResult] = useState(null);
+  const [result, setResult] = useState(null);
+  const [minScore, setMinScore] = useState(0.3);
+  const [hidden, setHidden] = useState(() => new Set());
+  const [hoverIdx, setHoverIdx] = useState(null);
   const [copied, setCopied] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
 
-  // Xử lý khi chọn file ảnh từ máy
-  const handleFileSelect = (file) => {
-    if (!file) return;
+  // Danh sách mô hình từ server (để biết mô hình nào đã nạp xong)
+  useEffect(() => {
+    xrayService.getModels()
+      .then((res) => {
+        const r = res.data?.result;
+        if (Array.isArray(r?.models) && r.models.length) setModels(r.models);
+        if (r?.default_model) setModel(r.default_model);
+      })
+      .catch(() => { /* service chưa chạy: vẫn cho chọn, lỗi sẽ báo khi phân tích */ });
+  }, []);
 
-    // Kiểm tra định dạng ảnh
-    if (!file.type.startsWith('image/')) {
-      toast.error('Vui lòng chọn file hình ảnh hợp lệ (JPG, PNG, WEBP, JPEG)');
+  // Giải phóng URL ảnh xem trước khi đổi ảnh / rời trang
+  useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
+
+  const handleFileSelect = (f) => {
+    if (!f) return;
+    if (!['image/jpeg', 'image/png'].includes(f.type)) {
+      toast.error('Chỉ nhận ảnh JPG hoặc PNG');
       return;
     }
-
-    // Giới hạn 15MB
-    if (file.size > 15 * 1024 * 1024) {
-      toast.error('Dung lượng hình ảnh không được vượt quá 15MB');
+    if (f.size > MAX_MB * 1024 * 1024) {
+      toast.error(`Dung lượng ảnh không được vượt quá ${MAX_MB}MB`);
       return;
     }
-
-    setSelectedFile(file);
-    const objectUrl = URL.createObjectURL(file);
-    setPreviewUrl(objectUrl);
-    setDiagnosisResult(null);
+    setFile(f);
+    setPreviewUrl(URL.createObjectURL(f));
+    setResult(null);
+    setHidden(new Set());
   };
 
-  const handleInputChange = (e) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      handleFileSelect(file);
-    }
-  };
-
-  // Kéo thả ảnh
-  const handleDrop = (e) => {
-    e.preventDefault();
-    setIsDragOver(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) {
-      handleFileSelect(file);
-    }
-  };
-
-  // Chọn ảnh mẫu thử nghiệm
-  const handleSelectSample = (sample) => {
-    setSelectedFile(null);
-    setPreviewUrl(sample.url);
-    setDiagnosisResult(sample.mockResult);
-    toast.info(`Đã nạp ảnh mẫu: "${sample.name}"`);
-  };
-
-  // Reset
-  const handleClearImage = () => {
-    setSelectedFile(null);
+  const handleClear = () => {
+    setFile(null);
     setPreviewUrl('');
-    setDiagnosisResult(null);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
+    setResult(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  /**
-   * =========================================================================
-   * GỌI PHÂN TÍCH AI (AI INFERENCE)
-   * =========================================================================
-   * TODO (Sau này khi bạn triển khai AI service, gắn API tại đây):
-   * 
-   * async function callDentalAIService(imageFile) {
-   *   const formData = new FormData();
-   *   formData.append('image', imageFile);
-   *   const res = await api.post('/ai/dental-diagnose', formData, {
-   *     headers: { 'Content-Type': 'multipart/form-data' }
-   *   });
-   *   return res.data.result;
-   * }
-   * =========================================================================
-   */
-  const handleAnalyzeImage = async () => {
-    if (!previewUrl && !selectedFile) {
-      toast.warning('Vui lòng tải lên ảnh chụp răng hoặc phim X-quang trước khi phân tích');
+  const handleAnalyze = async () => {
+    if (!file) {
+      toast.warning('Vui lòng tải lên phim X-quang toàn cảnh trước khi phân tích');
       return;
     }
-
     setAnalyzing(true);
-    setDiagnosisResult(null);
-
+    setResult(null);
     try {
-      // Mô phỏng thời gian AI phân tích ảnh trong 1.6 giây
-      await new Promise((resolve) => setTimeout(resolve, 1600));
-
-      // Mặc định kết quả chẩn đoán mô phỏng thông minh
-      const simulatedResult = {
-        diseaseName: 'Sâu ngà răng sâu / Nguy cơ viêm tủy (Deep Dental Caries)',
-        icdCode: 'K02.1',
-        confidence: 95.8,
-        severity: 'Nghiêm trọng (Cần xử lý sớm)',
-        severityColor: '#dc2626',
-        severityBg: '#fee2e2',
-        description:
-          'Hệ thống phát hiện tổn thương tiêu hủy cấu trúc mô cứng của răng với mật độ thấu quang cao tại mặt nhai và mặt tiếp giáp, độ sâu tổn thương tiến gần buồng tủy răng.',
-        differentials: [
-          { name: 'Sâu răng ngà sâu tiến triển', prob: 95.8 },
-          { name: 'Viêm tủy răng tiền phát có thể hồi phục', prob: 78.4 },
-          { name: 'Nứt vỡ thân răng vi thể', prob: 22.1 },
-        ],
-        recommendations: [
-          'Thực hiện thăm khám trực tiếp bằng thám trâm và thử cảm giác nhiệt (Cold test).',
-          'Chụp thêm phim X-quang cận chóp kỹ thuật số góc chuẩn để xác định ranh giới tủy.',
-          'Làm sạch xoang hàn bằng mũi khoan siêu tốc, lót đáy canxi hydroxit hoặc MTA che tủy.',
-        ],
-      };
-
-      setDiagnosisResult(simulatedResult);
-      toast.success('AI đã phân tích xong và đưa ra dự đoán bệnh lý!');
+      const res = await xrayService.analyze(file, model);
+      const r = res.data?.result;
+      setResult(r);
+      setHidden(new Set());
+      toast.success(`Đã phân tích xong: ${r.num_detections} vùng được đánh dấu`);
     } catch (err) {
-      toast.error('Có lỗi xảy ra trong quá trình phân tích hình ảnh');
+      toast.error(getErrorMessage(err, 'Không phân tích được ảnh, vui lòng thử lại'));
     } finally {
       setAnalyzing(false);
     }
   };
 
-  // Sao chép kết luận chẩn đoán vào clipboard
-  const handleCopyConclusion = () => {
-    if (!diagnosisResult) return;
-    const text = `[AI Chẩn đoán]: ${diagnosisResult.diseaseName} (${diagnosisResult.icdCode}) - Độ tin cậy: ${diagnosisResult.confidence}%. ${diagnosisResult.description}`;
+  // Box đang hiển thị: trên ngưỡng bác sĩ chọn và lớp không bị ẩn
+  const visible = useMemo(() => {
+    if (!result) return [];
+    return result.detections
+      .map((d, idx) => ({ ...d, idx }))
+      .filter((d) => d.score >= minScore && !hidden.has(d.class_id));
+  }, [result, minScore, hidden]);
+
+  // Tóm tắt theo lớp, tính lại theo ngưỡng hiện tại
+  const summary = useMemo(() => {
+    if (!result) return [];
+    return result.summary.map((s) => {
+      const boxes = result.detections.filter((d) => d.class_id === s.class_id && d.score >= minScore);
+      return { ...s, count: boxes.length, max_score: boxes.reduce((m, b) => Math.max(m, b.score), 0) };
+    });
+  }, [result, minScore]);
+
+  const toggleClass = (cid) => {
+    setHidden((prev) => {
+      const next = new Set(prev);
+      if (next.has(cid)) next.delete(cid); else next.add(cid);
+      return next;
+    });
+  };
+
+  const handleDownloadJson = () => {
+    if (!result) return;
+    const blob = new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ket-qua-xquang-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleCopy = () => {
+    if (!result) return;
+    const lines = summary.filter((s) => s.count > 0)
+      .map((s) => `- ${s.name_vi}: ${s.count} vùng (độ tin cậy cao nhất ${fmtScore(s.max_score)})`);
+    const text = [
+      `[AI hỗ trợ đọc phim - mô hình ${result.model}, ngưỡng ${fmtScore(minScore)}]`,
+      ...(lines.length ? lines : ['- Không phát hiện vùng nào trên ngưỡng']),
+      'Kết quả chỉ mang tính tham khảo, cần bác sĩ xác nhận.',
+    ].join('\n');
     navigator.clipboard.writeText(text);
     setCopied(true);
-    toast.success('Đã sao chép kết luận AI vào clipboard!');
+    toast.success('Đã sao chép tóm tắt');
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const pathologyFound = summary.filter((s) => s.group === 'pathology' && s.count > 0);
+
   return (
     <div style={{ paddingBottom: 40 }}>
-      {/* Hidden file input */}
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*"
+        accept="image/jpeg,image/png"
         style={{ display: 'none' }}
-        onChange={handleInputChange}
+        onChange={(e) => handleFileSelect(e.target.files?.[0])}
       />
 
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16, marginBottom: 24 }}>
+      <div style={{ marginBottom: 20 }}>
+        <h1 style={{ margin: '0 0 6px', fontSize: '1.6rem', fontWeight: 800, color: 'var(--gray-900)', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Sparkles size={28} style={{ color: 'var(--doctor-accent)' }} />
+          AI hỗ trợ đọc phim X-quang toàn cảnh
+        </h1>
+        <p style={{ margin: 0, color: 'var(--gray-500)', fontSize: '0.9rem' }}>
+          Đánh dấu vị trí 9 loại tổn thương và cấu trúc: viêm quanh chóp, sâu răng, răng khôn, mất răng, miếng trám, điều trị tủy, implant, mão sứ, cầu răng sứ.
+        </p>
+      </div>
+
+      {/* Lưu ý */}
+      <div style={{ padding: '12px 18px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 12, marginBottom: 20, display: 'flex', gap: 12, fontSize: '0.85rem', color: '#92400e', lineHeight: 1.55 }}>
+        <ShieldAlert size={20} style={{ flexShrink: 0, color: '#d97706', marginTop: 1 }} />
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-            <h1 style={{ margin: 0, fontSize: '1.6rem', fontWeight: 800, color: 'var(--gray-900)', display: 'flex', alignItems: 'center', gap: 10 }}>
-              <Sparkles size={28} style={{ color: 'var(--doctor-accent)' }} />
-              AI Chẩn đoán Bệnh Răng Miệng
-            </h1>
-            <span
-              className="badge"
-              style={{
-                background: '#ede9fe',
-                color: '#6d28d9',
-                fontWeight: 700,
-                fontSize: '0.75rem',
-                padding: '4px 10px',
-                borderRadius: 20,
-              }}
-            >
-              AI Assistant Module (Ready for API)
-            </span>
-          </div>
-          <p style={{ margin: 0, color: 'var(--gray-500)', fontSize: '0.9rem' }}>
-            Hệ thống hỗ trợ bác sĩ nhận diện tự động các loại bệnh lý nha khoa (sâu răng, viêm tủy, răng khôn, viêm quanh cuống...) từ hình ảnh chụp hoặc phim X-quang
-          </p>
+          <strong>Công cụ hỗ trợ, không thay thế chẩn đoán của bác sĩ.</strong> Chỉ dùng phim X-quang toàn cảnh (panoramic), đúng chiều.
+          Độ tin cậy dùng để xếp hạng vùng đánh dấu, <strong>không phải xác suất mắc bệnh</strong>. Ảnh chỉ được phân tích, không được lưu lại.
         </div>
       </div>
 
-      {/* Banner lưu ý */}
-      <div
-        style={{
-          padding: '12px 18px',
-          background: '#eff6ff',
-          border: '1px solid #bfdbfe',
-          borderRadius: 12,
-          marginBottom: 24,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          fontSize: '0.85rem',
-          color: '#1e40af',
-        }}
-      >
-        <Info size={20} style={{ flexShrink: 0, color: '#2563eb' }} />
-        <div style={{ flex: 1, lineHeight: 1.5 }}>
-          <strong>Cơ chế hoạt động:</strong> Hình ảnh được phân tích trực tiếp từ thiết bị của bác sĩ gửi tới mô hình AI và không lưu trữ lên kho Supabase. Kết quả từ AI đóng vai trò tham vấn chuyên môn, hỗ trợ bác sĩ đưa ra chẩn đoán chính xác hơn.
-        </div>
-      </div>
-
-      {/* Main Grid: Upload & Preview on Left, Analysis & Results on Right */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: 24, alignItems: 'start' }}>
-        {/* ================= CỘT TRÁI: VÙNG TẢI ẢNH & PREVIEW ================= */}
-        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-          <div style={{ padding: '16px 20px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--gray-900)', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <ImageIcon size={18} style={{ color: 'var(--doctor-accent)' }} />
-              Hình ảnh cần phân tích
-            </h3>
-            {previewUrl && (
-              <button
-                type="button"
-                className="btn btn-sm btn-ghost"
-                onClick={handleClearImage}
-                style={{ fontSize: '0.8rem', color: '#dc2626' }}
-              >
+      {/* Ảnh và điều khiển */}
+      <div className="card" style={{ padding: 0, overflow: 'hidden', marginBottom: 20 }}>
+        <div style={{ padding: '14px 20px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--gray-900)', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <ImageIcon size={18} style={{ color: 'var(--doctor-accent)' }} />
+            Phim X-quang
+          </h3>
+          {previewUrl && (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="button" className="btn btn-sm btn-outline" onClick={() => fileInputRef.current?.click()} disabled={analyzing}>
+                Đổi ảnh khác
+              </button>
+              <button type="button" className="btn btn-sm btn-ghost" onClick={handleClear} disabled={analyzing} style={{ color: '#dc2626' }}>
                 Xóa ảnh
               </button>
-            )}
-          </div>
-
-          <div style={{ padding: 20 }}>
-            {/* Dropzone hoặc Preview */}
-            {!previewUrl ? (
-              <div
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  setIsDragOver(true);
-                }}
-                onDragLeave={() => setIsDragOver(false)}
-                onDrop={handleDrop}
-                onClick={() => fileInputRef.current?.click()}
-                style={{
-                  border: isDragOver ? '2px dashed var(--doctor-accent)' : '2px dashed #cbd5e1',
-                  background: isDragOver ? '#faf5ff' : '#f8fafc',
-                  borderRadius: 14,
-                  padding: '48px 20px',
-                  textAlign: 'center',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s',
-                }}
-              >
-                <div
-                  style={{
-                    width: 56,
-                    height: 56,
-                    borderRadius: '50%',
-                    background: '#ede9fe',
-                    color: 'var(--doctor-accent)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    margin: '0 auto 14px',
-                  }}
-                >
-                  <Upload size={26} />
-                </div>
-                <p style={{ margin: '0 0 6px', fontWeight: 700, fontSize: '1rem', color: 'var(--gray-800)' }}>
-                  Kéo thả ảnh vào đây hoặc bấm để tải lên
-                </p>
-                <p style={{ margin: 0, fontSize: '0.825rem', color: 'var(--gray-500)' }}>
-                  Hỗ trợ định dạng JPG, PNG, WEBP, ảnh chụp cận cảnh hoặc phim X-quang nha khoa (Tối đa 15MB)
-                </p>
-              </div>
-            ) : (
-              <div>
-                <div
-                  style={{
-                    position: 'relative',
-                    borderRadius: 12,
-                    overflow: 'hidden',
-                    border: '1px solid #e2e8f0',
-                    background: '#0f172a',
-                    textAlign: 'center',
-                    minHeight: 280,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <img
-                    src={previewUrl}
-                    alt="Dental preview"
-                    style={{
-                      maxWidth: '100%',
-                      maxHeight: 380,
-                      objectFit: 'contain',
-                      display: 'block',
-                      margin: '0 auto',
-                    }}
-                  />
-
-                  {/* Scanning overlay effect when analyzing */}
-                  {analyzing && (
-                    <div
-                      style={{
-                        position: 'absolute',
-                        inset: 0,
-                        background: 'rgba(124, 58, 237, 0.25)',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        backdropFilter: 'blur(2px)',
-                      }}
-                    >
-                      <div className="spinner" style={{ borderColor: '#ffffff', borderTopColor: 'transparent', width: 42, height: 42 }} />
-                      <span style={{ color: '#ffffff', fontWeight: 700, fontSize: '0.95rem', marginTop: 12, textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>
-                        AI đang quét và đối chiếu bệnh lý...
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
-                  <span style={{ fontSize: '0.8rem', color: 'var(--gray-500)' }}>
-                    {selectedFile ? `File: ${selectedFile.name} (${(selectedFile.size / 1024).toFixed(1)} KB)` : 'Ảnh minh họa thử nghiệm'}
-                  </span>
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-outline"
-                    onClick={() => fileInputRef.current?.click()}
-                    style={{ fontSize: '0.8rem' }}
-                  >
-                    Đổi ảnh khác
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Action Analyze Button */}
-            <div style={{ marginTop: 20 }}>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={handleAnalyzeImage}
-                disabled={(!previewUrl && !selectedFile) || analyzing}
-                style={{
-                  width: '100%',
-                  padding: '12px 20px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 10,
-                  fontSize: '0.95rem',
-                  fontWeight: 700,
-                  background: 'var(--doctor-accent)',
-                  borderColor: 'var(--doctor-accent)',
-                }}
-              >
-                {analyzing ? (
-                  <>
-                    <RefreshCw size={18} className="spin-slow" />
-                    <span>Đang phân tích bệnh lý...</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles size={18} />
-                    <span>Phân tích hình ảnh với AI</span>
-                  </>
-                )}
-              </button>
             </div>
-
-            {/* Ảnh mẫu thử nghiệm (Quick sample selector) */}
-            <div style={{ marginTop: 24, paddingTop: 18, borderTop: '1px solid #f1f5f9' }}>
-              <span style={{ fontSize: '0.825rem', fontWeight: 700, color: 'var(--gray-600)', display: 'block', marginBottom: 10 }}>
-                Thử nhanh với ảnh mẫu bệnh án:
-              </span>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {SAMPLE_PREVIEWS.map((sample) => (
-                  <button
-                    key={sample.id}
-                    type="button"
-                    onClick={() => handleSelectSample(sample)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '8px 12px',
-                      background: '#f8fafc',
-                      border: '1px solid #e2e8f0',
-                      borderRadius: 8,
-                      fontSize: '0.8rem',
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                      color: 'var(--gray-800)',
-                      transition: 'all 0.15s',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.borderColor = 'var(--doctor-accent)';
-                      e.currentTarget.style.background = '#faf5ff';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.borderColor = '#e2e8f0';
-                      e.currentTarget.style.background = '#f8fafc';
-                    }}
-                  >
-                    <span style={{ fontWeight: 600 }}>{sample.name}</span>
-                    <ArrowRight size={13} style={{ color: 'var(--gray-400)' }} />
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
+          )}
         </div>
 
-        {/* ================= CỘT PHẢI: KẾT QUẢ PHÂN TÍCH AI ================= */}
-        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-          <div style={{ padding: '16px 20px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--gray-900)', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Activity size={18} style={{ color: '#16a34a' }} />
-              Kết quả chẩn đoán bệnh lý
-            </h3>
-            {diagnosisResult && (
-              <button
-                type="button"
-                className="btn btn-sm btn-outline"
-                onClick={handleCopyConclusion}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', padding: '4px 10px' }}
-              >
-                {copied ? <Check size={13} color="#16a34a" /> : <Copy size={13} />}
-                <span>{copied ? 'Đã sao chép' : 'Sao chép kết luận'}</span>
-              </button>
-            )}
-          </div>
-
-          <div style={{ padding: 20 }}>
-            {!diagnosisResult && !analyzing ? (
-              <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--gray-400)' }}>
-                <Zap size={48} style={{ margin: '0 auto 12px', opacity: 0.35, color: 'var(--doctor-accent)' }} />
-                <p style={{ fontWeight: 700, fontSize: '1.05rem', color: 'var(--gray-700)', margin: '0 0 6px' }}>
-                  Chưa có dữ liệu phân tích
-                </p>
-                <p style={{ fontSize: '0.85rem', color: 'var(--gray-500)', margin: 0, maxWidth: 360, marginInline: 'auto' }}>
-                  Tải lên ảnh chụp khoang miệng hoặc phim X-quang răng rồi nhấn <strong>"Phân tích hình ảnh với AI"</strong> để xem kết quả nhận diện
-                </p>
+        <div style={{ padding: 20 }}>
+          {!previewUrl ? (
+            <div
+              onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+              onDragLeave={() => setIsDragOver(false)}
+              onDrop={(e) => { e.preventDefault(); setIsDragOver(false); handleFileSelect(e.dataTransfer.files?.[0]); }}
+              onClick={() => fileInputRef.current?.click()}
+              style={{
+                border: isDragOver ? '2px dashed var(--doctor-accent)' : '2px dashed #cbd5e1',
+                background: isDragOver ? '#eff6ff' : '#f8fafc',
+                borderRadius: 14, padding: '48px 20px', textAlign: 'center', cursor: 'pointer', transition: 'all 0.2s',
+              }}
+            >
+              <div style={{ width: 56, height: 56, borderRadius: '50%', background: '#dbeafe', color: 'var(--doctor-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}>
+                <Upload size={26} />
               </div>
-            ) : analyzing ? (
-              <div style={{ padding: '60px 20px', textAlign: 'center' }}>
-                <div className="spinner" style={{ margin: '0 auto 16px', width: 44, height: 44 }} />
-                <h4 style={{ margin: '0 0 8px', fontSize: '1.05rem', fontWeight: 700, color: 'var(--gray-800)' }}>
-                  Mô hình AI đang xử lý hình ảnh...
-                </h4>
-                <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--gray-500)' }}>
-                  Đang quét và so sánh các đặc trưng giải phẫu nha khoa với tập dữ liệu bệnh lý
-                </p>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-                {/* 1. Primary Disease Identified */}
-                <div
-                  style={{
-                    padding: 18,
-                    background: '#f8fafc',
-                    borderRadius: 12,
-                    border: '1px solid #e2e8f0',
-                    borderLeft: '4px solid var(--doctor-accent)',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10, marginBottom: 8 }}>
-                    <div>
-                      <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--gray-500)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                        Bệnh lý nhận diện chính
-                      </span>
-                      <h2 style={{ margin: '4px 0 0', fontSize: '1.2rem', fontWeight: 800, color: 'var(--gray-900)' }}>
-                        {diagnosisResult.diseaseName}
-                      </h2>
-                    </div>
+              <p style={{ margin: '0 0 6px', fontWeight: 700, fontSize: '1rem', color: 'var(--gray-800)' }}>
+                Kéo thả phim vào đây hoặc bấm để tải lên
+              </p>
+              <p style={{ margin: 0, fontSize: '0.825rem', color: 'var(--gray-500)' }}>
+                Phim X-quang toàn cảnh, định dạng JPG hoặc PNG, tối đa {MAX_MB}MB
+              </p>
+            </div>
+          ) : (
+            <XrayCanvas
+              src={previewUrl}
+              result={result}
+              boxes={visible}
+              hoverIdx={hoverIdx}
+              setHoverIdx={setHoverIdx}
+              analyzing={analyzing}
+            />
+          )}
 
-                    <span
-                      className="badge"
+          {/* Chọn mô hình + nút phân tích */}
+          <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end', flexWrap: 'wrap', marginTop: 18 }}>
+            <div style={{ flex: '1 1 320px' }}>
+              <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--gray-600)', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                <Cpu size={14} /> Mô hình
+              </span>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                {models.map((m) => {
+                  const active = model === m.name;
+                  return (
+                    <button
+                      key={m.name}
+                      type="button"
+                      disabled={!m.loaded || analyzing}
+                      onClick={() => setModel(m.name)}
+                      title={m.loaded ? m.description : `Chưa sẵn sàng: ${m.error || 'mô hình chưa được nạp'}`}
                       style={{
-                        background: diagnosisResult.severityBg,
-                        color: diagnosisResult.severityColor,
-                        fontWeight: 700,
-                        fontSize: '0.75rem',
-                        padding: '4px 10px',
-                        borderRadius: 6,
+                        flex: '1 1 150px', textAlign: 'left', padding: '10px 12px', borderRadius: 10, cursor: m.loaded ? 'pointer' : 'not-allowed',
+                        border: active ? '2px solid var(--doctor-accent)' : '1px solid #e2e8f0',
+                        background: active ? '#eff6ff' : '#fff', opacity: m.loaded ? 1 : 0.5,
                       }}
                     >
-                      {diagnosisResult.severity}
-                    </span>
-                  </div>
-
-                  {/* Confidence Bar */}
-                  <div style={{ marginTop: 14 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                      <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--gray-700)' }}>
-                        Độ tin cậy của mô hình (Confidence score)
-                      </span>
-                      <strong style={{ fontSize: '0.95rem', color: 'var(--doctor-accent)' }}>
-                        {diagnosisResult.confidence}%
-                      </strong>
-                    </div>
-                    <div style={{ height: 8, background: '#e2e8f0', borderRadius: 4, overflow: 'hidden' }}>
-                      <div
-                        style={{
-                          height: '100%',
-                          width: `${diagnosisResult.confidence}%`,
-                          background: 'linear-gradient(90deg, #7c3aed 0%, #10b981 100%)',
-                          borderRadius: 4,
-                          transition: 'width 0.6s ease',
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Description */}
-                  <p style={{ margin: '14px 0 0', fontSize: '0.85rem', color: 'var(--gray-700)', lineHeight: 1.6 }}>
-                    {diagnosisResult.description}
-                  </p>
-                </div>
-
-                {/* 2. Differential Diagnoses */}
-                {diagnosisResult.differentials && (
-                  <div>
-                    <h4 style={{ margin: '0 0 10px', fontSize: '0.9rem', fontWeight: 700, color: 'var(--gray-800)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <Sliders size={15} style={{ color: 'var(--doctor-accent)' }} />
-                      <span>Xác suất các bệnh lý liên quan khác</span>
-                    </h4>
-
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      {diagnosisResult.differentials.map((item, idx) => (
-                        <div
-                          key={idx}
-                          style={{
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            padding: '8px 12px',
-                            background: '#f8fafc',
-                            borderRadius: 8,
-                            fontSize: '0.825rem',
-                          }}
-                        >
-                          <span style={{ color: 'var(--gray-800)', fontWeight: 500 }}>{item.name}</span>
-                          <span style={{ fontWeight: 700, color: item.prob >= 80 ? 'var(--doctor-accent)' : 'var(--gray-500)' }}>
-                            {item.prob}%
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* 3. Clinical Recommendations */}
-                {diagnosisResult.recommendations && (
-                  <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 12, padding: 16 }}>
-                    <h4 style={{ margin: '0 0 10px', fontSize: '0.9rem', fontWeight: 700, color: '#166534', display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <CheckCircle2 size={16} />
-                      <span>Gợi ý phác đồ & Hướng xử trí hỗ trợ Bác sĩ</span>
-                    </h4>
-                    <ul style={{ margin: 0, paddingLeft: 20, fontSize: '0.825rem', color: '#15803d', lineHeight: 1.6 }}>
-                      {diagnosisResult.recommendations.map((rec, idx) => (
-                        <li key={idx} style={{ marginBottom: 4 }}>
-                          {rec}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+                      <div style={{ fontWeight: 700, fontSize: '0.85rem', color: 'var(--gray-900)' }}>{m.label || m.name}</div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--gray-500)', marginTop: 2 }}>
+                        {m.loaded ? m.description : 'Chưa sẵn sàng'}
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
-            )}
+            </div>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleAnalyze}
+              disabled={!file || analyzing}
+              style={{ flex: '0 1 260px', padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, fontWeight: 700, background: 'var(--doctor-accent)', borderColor: 'var(--doctor-accent)' }}
+            >
+              {analyzing ? <><RefreshCw size={18} className="spin-slow" /><span>Đang phân tích...</span></> : <><Sparkles size={18} /><span>Phân tích phim</span></>}
+            </button>
           </div>
         </div>
       </div>
+
+      {/* Kết quả */}
+      {!result ? (
+        <div className="card" style={{ padding: '48px 20px', textAlign: 'center', color: 'var(--gray-400)' }}>
+          <Zap size={44} style={{ margin: '0 auto 12px', opacity: 0.35, color: 'var(--doctor-accent)' }} />
+          <p style={{ fontWeight: 700, fontSize: '1.05rem', color: 'var(--gray-700)', margin: '0 0 6px' }}>Chưa có kết quả</p>
+          <p style={{ fontSize: '0.85rem', color: 'var(--gray-500)', margin: 0 }}>
+            Tải phim lên, chọn mô hình rồi bấm <strong>Phân tích phim</strong>.
+          </p>
+        </div>
+      ) : (
+        <>
+          {result.warnings?.length > 0 && (
+            <div style={{ padding: '12px 18px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 12, marginBottom: 20, fontSize: '0.85rem', color: '#991b1b' }}>
+              {result.warnings.map((w) => (
+                <div key={w} style={{ display: 'flex', gap: 8, alignItems: 'center' }}><AlertTriangle size={16} /> {w}</div>
+              ))}
+            </div>
+          )}
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 20, alignItems: 'start' }}>
+            {/* Tóm tắt theo lớp */}
+            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              <div style={{ padding: '14px 20px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--gray-900)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Activity size={18} style={{ color: '#16a34a' }} /> Tóm tắt
+                </h3>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button type="button" className="btn btn-sm btn-outline" onClick={handleCopy} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.78rem' }}>
+                    {copied ? <Check size={13} color="#16a34a" /> : <Copy size={13} />} {copied ? 'Đã chép' : 'Sao chép'}
+                  </button>
+                  <button type="button" className="btn btn-sm btn-outline" onClick={handleDownloadJson} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.78rem' }}>
+                    <Download size={13} /> JSON
+                  </button>
+                </div>
+              </div>
+              <div style={{ padding: 20 }}>
+                <div style={{ padding: '10px 14px', borderRadius: 10, marginBottom: 14, fontSize: '0.85rem', background: pathologyFound.length ? '#fff7ed' : '#f0fdf4', color: pathologyFound.length ? '#9a3412' : '#166534', border: `1px solid ${pathologyFound.length ? '#fed7aa' : '#bbf7d0'}` }}>
+                  {pathologyFound.length
+                    ? <>Có vùng nghi ngờ <strong>{pathologyFound.map((s) => `${s.name_vi.toLowerCase()} (${s.count})`).join(', ')}</strong> trên ngưỡng {fmtScore(minScore)}.</>
+                    : <>Không có vùng nghi ngờ bệnh lý nào trên ngưỡng {fmtScore(minScore)}.</>}
+                </div>
+
+                {/* Ngưỡng */}
+                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: 'var(--gray-600)', marginBottom: 4 }}>
+                  Ngưỡng độ tin cậy: <span style={{ color: 'var(--doctor-accent)' }}>{fmtScore(minScore)}</span>
+                </label>
+                <input type="range" min={result.score_thr ?? 0.3} max={0.9} step={0.05} value={minScore}
+                  onChange={(e) => setMinScore(Number(e.target.value))} style={{ width: '100%' }} />
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: 'var(--gray-500)', marginBottom: 14 }}>
+                  <span>0.3: ít bỏ sót, nhiều báo nhầm hơn</span><span>0.5+: gọn, dễ bỏ sót</span>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {summary.map((s) => {
+                    const off = hidden.has(s.class_id);
+                    return (
+                      <button key={s.class_id} type="button" onClick={() => toggleClass(s.class_id)}
+                        title={off ? 'Bấm để hiện trên ảnh' : 'Bấm để ẩn trên ảnh'}
+                        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', borderRadius: 8, border: '1px solid #f1f5f9', background: s.count ? '#fff' : '#f8fafc', cursor: 'pointer', opacity: off ? 0.45 : 1, textAlign: 'left' }}>
+                        <span style={{ width: 12, height: 12, borderRadius: 3, background: CLASS_COLORS[s.class_id], flexShrink: 0 }} />
+                        <span style={{ flex: 1, fontSize: '0.85rem', fontWeight: s.group === 'pathology' ? 700 : 500, color: 'var(--gray-800)' }}>
+                          {s.name_vi} <span style={{ fontWeight: 400, color: 'var(--gray-400)', fontSize: '0.75rem' }}>· {GROUP_LABELS[s.group]}</span>
+                        </span>
+                        <span style={{ fontSize: '0.8rem', color: s.count ? 'var(--gray-900)' : 'var(--gray-400)', fontWeight: 700 }}>{s.count}</span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--gray-500)', width: 40, textAlign: 'right' }}>{s.count ? fmtScore(s.max_score) : '–'}</span>
+                        {off ? <EyeOff size={14} color="#94a3b8" /> : <Eye size={14} color="#94a3b8" />}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p style={{ margin: '12px 0 0', fontSize: '0.75rem', color: 'var(--gray-500)' }}>
+                  Mô hình {result.model} · {result.device?.startsWith('cuda') ? 'GPU' : 'CPU'} · {Math.round(result.inference_ms)} ms · ảnh {result.image_width}×{result.image_height}
+                </p>
+              </div>
+            </div>
+
+            {/* Danh sách vùng đánh dấu */}
+            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              <div style={{ padding: '14px 20px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc' }}>
+                <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--gray-900)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Info size={18} style={{ color: 'var(--doctor-accent)' }} /> Các vùng đánh dấu ({visible.length})
+                </h3>
+              </div>
+              <div style={{ padding: 12, maxHeight: 520, overflowY: 'auto' }}>
+                {visible.length === 0 ? (
+                  <p style={{ padding: 20, textAlign: 'center', color: 'var(--gray-500)', fontSize: '0.85rem', margin: 0 }}>
+                    Không có vùng nào trên ngưỡng hiện tại.
+                  </p>
+                ) : visible.map((d) => (
+                  <div key={d.idx}
+                    onMouseEnter={() => setHoverIdx(d.idx)} onMouseLeave={() => setHoverIdx(null)}
+                    style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 8, background: hoverIdx === d.idx ? '#f1f5f9' : 'transparent', cursor: 'default' }}>
+                    <span style={{ width: 12, height: 12, borderRadius: 3, border: `2px ${d.score >= STRONG_SCORE ? 'solid' : 'dashed'} ${CLASS_COLORS[d.class_id]}`, flexShrink: 0 }} />
+                    <span style={{ flex: 1, fontSize: '0.85rem', color: 'var(--gray-800)', fontWeight: d.group === 'pathology' ? 700 : 500 }}>
+                      {d.name_vi}
+                      {d.score < STRONG_SCORE && <span style={{ marginLeft: 6, fontSize: '0.72rem', color: '#b45309', fontWeight: 600 }}>cần xem lại</span>}
+                    </span>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--gray-600)' }}>độ tin cậy {fmtScore(d.score)}</span>
+                  </div>
+                ))}
+              </div>
+              <div style={{ padding: '10px 20px', borderTop: '1px solid #f1f5f9', fontSize: '0.75rem', color: 'var(--gray-500)' }}>
+                Nét liền: độ tin cậy ≥ {STRONG_SCORE}. Nét đứt: dưới {STRONG_SCORE}, cần bác sĩ xem lại. Rê chuột lên dòng để làm nổi vùng trên ảnh.
+              </div>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
 
+// Ảnh phim kèm các khung vẽ bằng SVG. viewBox = kích thước ảnh gốc nên toạ độ bbox dùng trực tiếp.
+function XrayCanvas({ src, result, boxes, hoverIdx, setHoverIdx, analyzing }) {
+  const W = result?.image_width;
+  const H = result?.image_height;
+  const fontSize = W ? Math.max(14, W / 80) : 14;
+
+  return (
+    <div style={{ position: 'relative', borderRadius: 12, overflow: 'hidden', border: '1px solid #e2e8f0', background: '#0f172a' }}>
+      <img src={src} alt="Phim X-quang" style={{ display: 'block', width: '100%', height: 'auto' }} />
+      {result && (
+        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
+          {boxes.map((d) => {
+            const [x1, y1, x2, y2] = d.bbox_xyxy;
+            const color = CLASS_COLORS[d.class_id];
+            const active = hoverIdx === d.idx;
+            const dim = hoverIdx !== null && !active;
+            const label = `${d.name_vi} ${fmtScore(d.score)}`;
+            return (
+              <g key={d.idx} opacity={dim ? 0.3 : 1} onMouseEnter={() => setHoverIdx(d.idx)} onMouseLeave={() => setHoverIdx(null)} style={{ cursor: 'default' }}>
+                <rect x={x1} y={y1} width={x2 - x1} height={y2 - y1} fill={active ? `${color}33` : 'transparent'}
+                  stroke={color} strokeWidth={active ? 3.5 : 2} vectorEffect="non-scaling-stroke"
+                  strokeDasharray={d.score >= STRONG_SCORE ? undefined : '6 4'} />
+                <rect x={x1} y={Math.max(0, y1 - fontSize * 1.35)} width={label.length * fontSize * 0.58 + fontSize * 0.6} height={fontSize * 1.35} fill={color} rx={3} />
+                <text x={x1 + fontSize * 0.3} y={Math.max(0, y1 - fontSize * 1.35) + fontSize * 1.02} fill="#fff" fontSize={fontSize} fontWeight={700} fontFamily="sans-serif">
+                  {label}
+                </text>
+                <title>{`${d.name_vi} (${d.class}) – độ tin cậy ${fmtScore(d.score)}`}</title>
+              </g>
+            );
+          })}
+        </svg>
+      )}
+      {analyzing && (
+        <div style={{ position: 'absolute', inset: 0, background: 'rgba(15, 23, 42, 0.55)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="spinner" style={{ borderColor: '#ffffff', borderTopColor: 'transparent', width: 42, height: 42 }} />
+          <span style={{ color: '#ffffff', fontWeight: 700, fontSize: '0.95rem', marginTop: 12 }}>Mô hình đang phân tích phim...</span>
+        </div>
+      )}
+    </div>
+  );
+}

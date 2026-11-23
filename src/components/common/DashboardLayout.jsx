@@ -67,7 +67,7 @@ export default function DashboardLayout({ children }) {
           links: [
             { to: '/doctor', end: true, label: 'Bảng điều khiển', icon: <LayoutDashboard size={18} /> },
             { to: '/doctor/schedule', label: 'Lịch khám bệnh', icon: <Calendar size={18} /> },
-            { to: '/doctor/ai-diagnosis', label: 'AI Chẩn đoán bệnh răng', icon: <Sparkles size={18} /> },
+            { to: '/doctor/ai-diagnosis', label: 'AI đọc phim X-quang', icon: <Sparkles size={18} /> },
             { to: '/doctor/profile', label: 'Hồ sơ chuyên môn', icon: <Stethoscope size={18} /> },
           ],
         };

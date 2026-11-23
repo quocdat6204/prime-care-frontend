@@ -43,6 +43,10 @@ export default defineConfig(({ mode }) => {
           target: backendTarget,
           changeOrigin: true,
         },
+        '/xray': {
+          target: backendTarget,
+          changeOrigin: true,
+        },
       },
     },
   };
