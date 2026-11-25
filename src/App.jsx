@@ -21,7 +21,6 @@ import PatientAppointments from './pages/patient/PatientAppointments';
 import PatientProfile from './pages/patient/PatientProfile';
 import DoctorDashboard from './pages/doctor/DoctorDashboard';
 import DoctorProfile from './pages/doctor/DoctorProfile';
-import DoctorSchedule from './pages/doctor/DoctorSchedule';
 import DoctorAIDiagnosis from './pages/doctor/DoctorAIDiagnosis';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import UserManagement from './pages/admin/UserManagement';
@@ -180,13 +179,7 @@ export default function App() {
           />
           <Route
             path="/doctor/schedule"
-            element={
-              <ProtectedRoute allowedRoles={['DOCTOR', 'ADMIN']} onOpenLogin={openLogin}>
-                <DashboardLayout>
-                  <DoctorSchedule />
-                </DashboardLayout>
-              </ProtectedRoute>
-            }
+            element={<Navigate to="/doctor" replace />}
           />
           <Route
             path="/doctor/sessions/:id"

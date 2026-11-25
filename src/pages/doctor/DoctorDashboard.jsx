@@ -1,322 +1,766 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
 import { clinicService } from '../../services/clinicService';
+import { useToast } from '../../context/ToastContext';
+import { useAuth } from '../../context/AuthContext';
 import {
-  Calendar, Users, Stethoscope, Award, ArrowRight, Sun, Sunset,
-  CheckCircle2, XCircle, CalendarDays, Eye
+  Calendar, Users, UserCheck, RefreshCw, ChevronLeft, ChevronRight,
+  Eye, Stethoscope, CheckCircle2, XCircle, CalendarDays,
+  Sun, Sunset, ArrowRight, Clock
 } from 'lucide-react';
 import SessionAppointmentsModal from '../admin/SessionAppointmentsModal';
+import { formatDoctorDisplayName } from '../../utils/doctorRank';
 
-const rankLabels = {
-  PROFESSOR: 'GS',
-  DOCTORATE: 'TS',
-  MASTER: 'ThS',
+const WEEKDAY_LABELS = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
+const VIETNAMESE_DAYS = ['Chủ Nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];
+
+const formatLocalDate = (date) => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 };
 
-export default function DoctorDashboard() {
-  const { user } = useAuth();
-  const navigate = useNavigate();
+const parseLocalDate = (dateStr) => {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(y, m - 1, d);
+};
 
-  const [todaySessions, setTodaySessions] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [viewingSession, setViewingSession] = useState(null);
+const formatVietnameseDate = (dateStr) => {
+  if (!dateStr) return '';
+  try {
+    const d = parseLocalDate(dateStr);
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    return `${VIETNAMESE_DAYS[d.getDay()]}, ${day}/${month}/${d.getFullYear()}`;
+  } catch {
+    return dateStr;
+  }
+};
 
-  const todayStr = (() => {
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, '0');
-    const d = String(now.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  })();
+const formatShortDate = (dateStr) => {
+  if (!dateStr) return '';
+  const [, m, d] = dateStr.split('-');
+  return `${d}/${m}`;
+};
 
-  useEffect(() => {
-    const fetchTodaySessions = async () => {
-      setLoading(true);
-      try {
-        const res = await clinicService.getMySessions({ date: todayStr, size: 20 });
-        setTodaySessions(res.data.result?.content || []);
-      } catch (err) {
-        console.warn('Could not load today sessions for doctor:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchTodaySessions();
-  }, [todayStr]);
+/**
+ * Tạo lưới lịch 6 tuần (42 ô) bắt đầu từ Thứ 2 cho tháng đang xem,
+ * giúp chiều cao khung lịch luôn cố định và lấy đủ khoảng ngày from/to cho API.
+ */
+const buildCalendarGrid = (year, month) => {
+  const firstOfMonth = new Date(year, month, 1);
+  // Quy đổi getDay() (CN=0..T7=6) sang chuẩn T2=0..CN=6
+  const startOffset = (firstOfMonth.getDay() + 6) % 7;
+  const startDate = new Date(year, month, 1 - startOffset);
 
-  const totalPatientsToday = todaySessions.reduce((acc, s) => acc + (s.lastQueueNumber || 0), 0);
+  const cells = [];
+  for (let i = 0; i < 42; i++) {
+    const d = new Date(startDate);
+    d.setDate(startDate.getDate() + i);
+    cells.push({
+      dateStr: formatLocalDate(d),
+      dayNumber: d.getDate(),
+      year: d.getFullYear(),
+      month: d.getMonth(),
+      isCurrentMonth: d.getMonth() === month && d.getFullYear() === year,
+    });
+  }
+
+  return {
+    cells,
+    from: cells[0].dateStr,
+    to: cells[41].dateStr,
+    monthPrefix: `${year}-${String(month + 1).padStart(2, '0')}`,
+  };
+};
+
+const getRelativeDayBadge = (dateStr, todayStr, tomorrowStr) => {
+  if (dateStr === todayStr) {
+    return { label: 'Hôm nay', bg: '#dcfce7', color: '#15803d' };
+  }
+  if (dateStr === tomorrowStr) {
+    return { label: 'Ngày mai', bg: '#dbeafe', color: '#1d4ed8' };
+  }
+  if (dateStr > todayStr) {
+    return { label: 'Sắp tới', bg: '#ede9fe', color: '#6d28d9' };
+  }
+  return { label: 'Đã diễn ra', bg: '#f1f5f9', color: '#64748b' };
+};
+
+function DoctorCalendar({
+  currentMonth,
+  calendar,
+  selectedDate,
+  todayStr,
+  indicatorsByDate,
+  loading,
+  onPrevMonth,
+  onNextMonth,
+  onGoToday,
+  onSelectCell,
+}) {
+  const isViewingToday =
+    selectedDate === todayStr &&
+    currentMonth.year === Number(todayStr.slice(0, 4)) &&
+    currentMonth.month === Number(todayStr.slice(5, 7)) - 1;
 
   return (
-    <div>
-      {/* Title */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
-        <h1 style={{ margin: 0, fontSize: '1.6rem', fontWeight: 800 }}>
-          <Stethoscope size={28} style={{ marginRight: 8, verticalAlign: 'middle', color: 'var(--doctor-accent)' }} />
-          Xin chào, {rankLabels[user?.rank] ? `${rankLabels[user.rank]}. ` : ''}{user?.fullName}
-        </h1>
+    <div className="card">
+      <div
+        className="card-header"
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '16px 18px',
+          borderBottom: '1px solid #f1f5f9',
+          gap: 8,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button
+            type="button"
+            className="btn btn-sm btn-outline"
+            onClick={onPrevMonth}
+            aria-label="Tháng trước"
+            style={{ width: 32, height: 32, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+          >
+            <ChevronLeft size={16} />
+          </button>
+
+          <h2 style={{ margin: '0 6px', fontSize: '1rem', fontWeight: 800, color: 'var(--gray-900)', minWidth: 126, textAlign: 'center' }}>
+            Tháng {currentMonth.month + 1}, {currentMonth.year}
+          </h2>
+
+          <button
+            type="button"
+            className="btn btn-sm btn-outline"
+            onClick={onNextMonth}
+            aria-label="Tháng sau"
+            style={{ width: 32, height: 32, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+          >
+            <ChevronRight size={16} />
+          </button>
+        </div>
 
         <button
-          className="btn btn-primary"
-          onClick={() => navigate('/doctor/schedule')}
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontWeight: 700 }}
+          type="button"
+          className={`btn btn-sm ${isViewingToday ? 'btn-primary' : 'btn-outline'}`}
+          onClick={onGoToday}
+          style={{ borderRadius: 20, padding: '4px 12px', fontSize: '0.78rem', fontWeight: 700 }}
         >
-          <CalendarDays size={18} />
-          <span>Xem lịch khám các ngày khác</span>
-          <ArrowRight size={16} />
+          Hôm nay
         </button>
       </div>
 
-      {/* KPI Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16, marginBottom: 28 }}>
+      <div className="card-body" style={{ padding: '14px 16px 16px', opacity: loading ? 0.7 : 1, transition: 'opacity 0.15s' }}>
+        <div className="doctor-cal-weekdays">
+          {WEEKDAY_LABELS.map((label, idx) => (
+            <div key={label} className={`doctor-cal-weekday ${idx === 6 ? 'is-sunday' : ''}`}>
+              {label}
+            </div>
+          ))}
+        </div>
+
+        <div className="doctor-cal-days" style={{ marginTop: 4 }}>
+          {calendar.cells.map((cell) => {
+            const info = indicatorsByDate.get(cell.dateStr);
+            const isSelected = cell.dateStr === selectedDate;
+            const isToday = cell.dateStr === todayStr;
+            const hasSessions = Boolean(info && (info.hasMorning || info.hasAfternoon));
+
+            const classNames = [
+              'doctor-cal-day',
+              !cell.isCurrentMonth && 'is-outside',
+              hasSessions && 'has-sessions',
+              isToday && 'is-today',
+              isSelected && 'is-selected',
+            ]
+              .filter(Boolean)
+              .join(' ');
+
+            const shiftSummary = [];
+            if (info?.hasMorning) shiftSummary.push('Ca sáng');
+            if (info?.hasAfternoon) shiftSummary.push('Ca chiều');
+            const tooltip = shiftSummary.length > 0
+              ? `${formatShortDate(cell.dateStr)} - Có lịch: ${shiftSummary.join(', ')}`
+              : `${formatShortDate(cell.dateStr)} - Không có ca khám`;
+
+            return (
+              <button
+                key={cell.dateStr}
+                type="button"
+                className={classNames}
+                onClick={() => onSelectCell(cell)}
+                title={tooltip}
+                aria-label={tooltip}
+                aria-pressed={isSelected}
+              >
+                <span className="doctor-cal-day-num">{cell.dayNumber}</span>
+                <span className="doctor-cal-dots" aria-hidden="true">
+                  {info?.hasMorning && <span className="doctor-cal-dot doctor-cal-dot--morning" />}
+                  {info?.hasAfternoon && <span className="doctor-cal-dot doctor-cal-dot--afternoon" />}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 10,
+            marginTop: 14,
+            paddingTop: 12,
+            borderTop: '1px solid #f1f5f9',
+            fontSize: '0.75rem',
+            color: 'var(--gray-500)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              <span className="doctor-cal-dot doctor-cal-dot--morning" /> Ca Sáng
+            </span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              <span className="doctor-cal-dot doctor-cal-dot--afternoon" /> Ca Chiều
+            </span>
+          </div>
+
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+            <span
+              style={{
+                width: 10,
+                height: 10,
+                borderRadius: 3,
+                border: '1.5px solid #3b82f6',
+                background: '#eff6ff',
+                display: 'inline-block',
+              }}
+            />
+            Hôm nay
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SessionCard({ session, onOpenDetail, onOpenAppointments }) {
+  const isMorning = session.shift === 'MORNING';
+  const booked = session.lastQueueNumber || 0;
+  const max = session.maxPatients || 0;
+  const percent = max > 0 ? Math.min(100, Math.round((booked / max) * 100)) : 0;
+  const availableSlots = session.availableSlots ?? Math.max(0, max - booked);
+  const progressColor = percent >= 90 ? '#ef4444' : percent >= 60 ? '#f59e0b' : 'var(--doctor-accent)';
+
+  return (
+    <div className={`doctor-session-card ${isMorning ? 'doctor-session-card--morning' : 'doctor-session-card--afternoon'}`}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <span
+            className="badge"
+            style={{
+              background: isMorning ? '#eff6ff' : '#fff7ed',
+              color: isMorning ? '#1d4ed8' : '#c2410c',
+              border: '1px solid',
+              borderColor: isMorning ? '#bfdbfe' : '#fed7aa',
+              fontWeight: 700,
+              fontSize: '0.8rem',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '5px 12px',
+            }}
+          >
+            {isMorning ? <Sun size={14} /> : <Sunset size={14} />}
+            {isMorning ? 'Ca Sáng (08:00 - 12:00)' : 'Ca Chiều (13:30 - 17:30)'}
+          </span>
+
+          <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--gray-500)' }}>
+            Mã ca #{session.id}
+          </span>
+        </div>
+
+        {session.status === 'OPEN' ? (
+          <span className="badge" style={{ background: '#dcfce7', color: '#16a34a', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+            <CheckCircle2 size={12} /> Đang mở
+          </span>
+        ) : (
+          <span className="badge" style={{ background: '#f1f5f9', color: '#64748b', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+            <XCircle size={12} /> Đã đóng
+          </span>
+        )}
+      </div>
+
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+          gap: 14,
+          padding: '12px 14px',
+          background: '#f8fafc',
+          borderRadius: 10,
+          marginBottom: 16,
+        }}
+      >
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <span style={{ fontSize: '0.78rem', color: 'var(--gray-500)', fontWeight: 600 }}>Bệnh nhân đã đặt</span>
+            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: percent >= 90 ? '#dc2626' : 'var(--gray-600)' }}>
+              {percent}%
+            </span>
+          </div>
+          <div style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--gray-900)', marginBottom: 6 }}>
+            {booked} / {max} <span style={{ fontSize: '0.78rem', fontWeight: 500, color: 'var(--gray-500)' }}>người</span>
+          </div>
+          <div style={{ height: 6, width: '100%', background: '#e2e8f0', borderRadius: 3, overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${percent}%`, background: progressColor, borderRadius: 3, transition: 'width 0.3s' }} />
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+          <span style={{ fontSize: '0.78rem', color: 'var(--gray-500)', fontWeight: 600, marginBottom: 4 }}>Chỗ còn trống</span>
+          <span style={{ fontSize: '0.95rem', fontWeight: 800, color: availableSlots > 0 ? '#059669' : '#dc2626' }}>
+            {availableSlots} chỗ
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+          <span style={{ fontSize: '0.78rem', color: 'var(--gray-500)', fontWeight: 600, marginBottom: 4 }}>Phí khám</span>
+          <span style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--gray-900)' }}>
+            {Number(session.examinationFee || 0).toLocaleString('vi-VN')} đ
+          </span>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <button
+          type="button"
+          className="btn btn-sm btn-outline"
+          onClick={() => onOpenAppointments(session)}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.82rem', fontWeight: 600 }}
+          title="Xem danh sách các bệnh nhân đã đăng ký"
+        >
+          <Eye size={14} />
+          <span>DS hẹn</span>
+        </button>
+
+        <button
+          type="button"
+          className="btn btn-sm btn-primary"
+          onClick={() => onOpenDetail(session)}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            fontSize: '0.82rem',
+            fontWeight: 700,
+            background: 'var(--doctor-accent)',
+            borderColor: 'var(--doctor-accent)',
+          }}
+          title="Vào tiếp nhận và khám bệnh nhân của ca này"
+        >
+          <Stethoscope size={15} />
+          <span>Vào khám</span>
+          <ArrowRight size={14} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export default function DoctorDashboard() {
+  const toast = useToast();
+  const navigate = useNavigate();
+  const { user } = useAuth();
+
+  const todayStr = useMemo(() => formatLocalDate(new Date()), []);
+  const tomorrowStr = useMemo(() => {
+    const tom = new Date();
+    tom.setDate(tom.getDate() + 1);
+    return formatLocalDate(tom);
+  }, []);
+
+  const [currentMonth, setCurrentMonth] = useState(() => {
+    const now = new Date();
+    return { year: now.getFullYear(), month: now.getMonth() };
+  });
+  const [selectedDate, setSelectedDate] = useState(todayStr);
+
+  const [monthSessions, setMonthSessions] = useState([]);
+  // Giữ riêng ca khám hôm nay để KPI hôm nay không bị về 0 khi bác sĩ lật sang tháng khác
+  const [todaySessions, setTodaySessions] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  const [shiftFilter, setShiftFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [viewingSession, setViewingSession] = useState(null);
+
+  const calendar = useMemo(
+    () => buildCalendarGrid(currentMonth.year, currentMonth.month),
+    [currentMonth.year, currentMonth.month]
+  );
+
+  const fetchTodaySessions = useCallback(async () => {
+    try {
+      const res = await clinicService.getMySessions({ date: todayStr, size: 20 });
+      setTodaySessions(res.data.result?.content || []);
+    } catch (err) {
+      console.warn('Could not load today sessions for doctor:', err);
+    }
+  }, [todayStr]);
+
+  const fetchMonthSessions = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await clinicService.getMySessions({
+        from: calendar.from,
+        to: calendar.to,
+        page: 0,
+        size: 200,
+      });
+      const content = res.data.result?.content || [];
+      setMonthSessions(content);
+
+      // Khi khung lịch tháng hiện tại chứa ngày hôm nay, cập nhật luôn KPI hôm nay không cần gọi thêm API
+      if (todayStr >= calendar.from && todayStr <= calendar.to) {
+        setTodaySessions(content.filter((s) => s.examDate === todayStr));
+      }
+    } catch (err) {
+      console.error('Error fetching doctor sessions:', err);
+      toast.error('Không thể tải lịch khám của bác sĩ');
+    } finally {
+      setLoading(false);
+    }
+  }, [calendar.from, calendar.to, todayStr, toast]);
+
+  useEffect(() => {
+    fetchMonthSessions();
+  }, [fetchMonthSessions]);
+
+  const handleRefresh = useCallback(() => {
+    fetchMonthSessions();
+    if (todayStr < calendar.from || todayStr > calendar.to) {
+      fetchTodaySessions();
+    }
+  }, [fetchMonthSessions, fetchTodaySessions, todayStr, calendar.from, calendar.to]);
+
+  // Gom nhóm ca khám theo ngày để chấm lịch và chuyển ngày tức thì (0ms)
+  const sessionsByDate = useMemo(() => {
+    const map = new Map();
+    for (const s of monthSessions) {
+      if (!s.examDate) continue;
+      const list = map.get(s.examDate) || [];
+      list.push(s);
+      map.set(s.examDate, list);
+    }
+    for (const list of map.values()) {
+      list.sort((a, b) => (a.shift === 'MORNING' ? -1 : 1) - (b.shift === 'MORNING' ? -1 : 1));
+    }
+    return map;
+  }, [monthSessions]);
+
+  const indicatorsByDate = useMemo(() => {
+    const map = new Map();
+    for (const [dateStr, list] of sessionsByDate.entries()) {
+      map.set(dateStr, {
+        hasMorning: list.some((s) => s.shift === 'MORNING'),
+        hasAfternoon: list.some((s) => s.shift === 'AFTERNOON'),
+      });
+    }
+    return map;
+  }, [sessionsByDate]);
+
+  const selectedDaySessions = useMemo(() => {
+    const list = sessionsByDate.get(selectedDate) || [];
+    return list.filter((s) => {
+      if (shiftFilter && s.shift !== shiftFilter) return false;
+      if (statusFilter && s.status !== statusFilter) return false;
+      return true;
+    });
+  }, [sessionsByDate, selectedDate, shiftFilter, statusFilter]);
+
+  const todayStats = useMemo(() => {
+    const patientsCount = todaySessions.reduce((acc, s) => acc + (s.lastQueueNumber || 0), 0);
+    return {
+      sessionsCount: todaySessions.length,
+      patientsCount,
+    };
+  }, [todaySessions]);
+
+  const monthStats = useMemo(() => {
+    const inMonth = monthSessions.filter((s) => s.examDate?.startsWith(calendar.monthPrefix));
+    const uniqueDays = new Set(inMonth.map((s) => s.examDate)).size;
+    const totalPatients = inMonth.reduce((acc, s) => acc + (s.lastQueueNumber || 0), 0);
+    return {
+      totalSessions: inMonth.length,
+      uniqueDays,
+      totalPatients,
+    };
+  }, [monthSessions, calendar.monthPrefix]);
+
+  const nearestScheduledDate = useMemo(() => {
+    const dates = [...sessionsByDate.keys()]
+      .filter((d) => d.startsWith(calendar.monthPrefix) && d !== selectedDate)
+      .sort();
+    if (dates.length === 0) return null;
+    return dates.find((d) => d >= todayStr) || dates[dates.length - 1];
+  }, [sessionsByDate, calendar.monthPrefix, selectedDate, todayStr]);
+
+  const switchMonth = (offset) => {
+    const next = new Date(currentMonth.year, currentMonth.month + offset, 1);
+    const nextYear = next.getFullYear();
+    const nextMonth = next.getMonth();
+    setCurrentMonth({ year: nextYear, month: nextMonth });
+
+    const todayDate = parseLocalDate(todayStr);
+    if (nextYear === todayDate.getFullYear() && nextMonth === todayDate.getMonth()) {
+      setSelectedDate(todayStr);
+    } else {
+      setSelectedDate(formatLocalDate(next));
+    }
+  };
+
+  const handleGoToday = () => {
+    const now = parseLocalDate(todayStr);
+    setCurrentMonth({ year: now.getFullYear(), month: now.getMonth() });
+    setSelectedDate(todayStr);
+  };
+
+  const handleSelectCell = (cell) => {
+    setSelectedDate(cell.dateStr);
+    if (!cell.isCurrentMonth) {
+      setCurrentMonth({ year: cell.year, month: cell.month });
+    }
+  };
+
+  const selectedBadge = getRelativeDayBadge(selectedDate, todayStr, tomorrowStr);
+  const doctorGreetingName = formatDoctorDisplayName(user?.fullName, user?.rank, { short: true });
+
+  return (
+    <div>
+      {/* Header chào mừng */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24, flexWrap: 'wrap', gap: 16 }}>
+        <div>
+          <h1 style={{ display: 'flex', alignItems: 'center', gap: 10, margin: 0, fontSize: '1.6rem', fontWeight: 800 }}>
+            <Stethoscope size={28} style={{ color: 'var(--doctor-accent)' }} />
+            <span>Xin chào, {doctorGreetingName}</span>
+          </h1>
+          <p style={{ margin: '6px 0 0', color: 'var(--gray-500)', fontSize: '0.9rem' }}>
+            Hôm nay {formatVietnameseDate(todayStr)} •{' '}
+            {todayStats.sessionsCount > 0
+              ? `Bạn có ${todayStats.sessionsCount} ca khám (${todayStats.patientsCount} bệnh nhân đã đăng ký)`
+              : 'Chưa có ca khám nào được phân công hôm nay'}
+          </p>
+        </div>
+
+        <button
+          type="button"
+          className="btn btn-outline"
+          onClick={handleRefresh}
+          disabled={loading}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}
+        >
+          <RefreshCw size={16} className={loading ? 'spin-slow' : ''} />
+          <span>Làm mới</span>
+        </button>
+      </div>
+
+      {/* Summary KPI Cards: Hôm nay & Tháng đang xem */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(215px, 1fr))', gap: 16, marginBottom: 24 }}>
         <div className="stat-card">
           <div className="stat-icon" style={{ background: 'var(--doctor-bg)', color: 'var(--doctor-accent)' }}>
-            <Calendar size={24} />
+            <Calendar size={22} />
           </div>
           <div className="stat-info">
-            <h3>Lịch khám hôm nay</h3>
-            <div className="stat-value">{todaySessions.length}</div>
+            <h3>Ca khám hôm nay</h3>
+            <div className="stat-value">{todayStats.sessionsCount}</div>
           </div>
         </div>
 
         <div className="stat-card">
           <div className="stat-icon" style={{ background: 'var(--success-bg)', color: 'var(--success)' }}>
-            <Users size={24} />
+            <UserCheck size={22} />
           </div>
           <div className="stat-info">
             <h3>Bệnh nhân hôm nay</h3>
-            <div className="stat-value">{totalPatientsToday}</div>
+            <div className="stat-value">{todayStats.patientsCount}</div>
           </div>
         </div>
 
         <div className="stat-card">
-          <div className="stat-icon" style={{ background: 'var(--warning-bg)', color: 'var(--warning)' }}>
-            <Award size={24} />
+          <div className="stat-icon" style={{ background: '#eff6ff', color: '#2563eb' }}>
+            <CalendarDays size={22} />
           </div>
           <div className="stat-info">
-            <h3>Cấp bậc chuyên môn</h3>
-            <div className="stat-value" style={{ fontSize: '1.25rem' }}>
-              {user?.rank ? (
-                <span className={`rank-badge rank-${user.rank.toLowerCase()}`}>
-                  {user.rank === 'PROFESSOR' ? 'Giáo sư' : user.rank === 'DOCTORATE' ? 'Tiến sĩ' : 'Thạc sĩ'}
-                </span>
-              ) : (
-                'Bác sĩ'
-              )}
+            <h3>Lịch tháng {currentMonth.month + 1}/{currentMonth.year}</h3>
+            <div className="stat-value">
+              {monthStats.totalSessions}{' '}
+              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--gray-500)', whiteSpace: 'nowrap' }}>
+                ca / {monthStats.uniqueDays} ngày
+              </span>
             </div>
+          </div>
+        </div>
+
+        <div className="stat-card">
+          <div className="stat-icon" style={{ background: '#fff7ed', color: '#ea580c' }}>
+            <Users size={22} />
+          </div>
+          <div className="stat-info">
+            <h3>Bệnh nhân trong tháng</h3>
+            <div className="stat-value">{monthStats.totalPatients}</div>
           </div>
         </div>
       </div>
 
-      {/* Ca khám hôm nay của bác sĩ */}
-      <div className="card" style={{ marginBottom: 24, borderTop: '3px solid var(--doctor-accent)' }}>
-        <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px' }}>
-          <div>
-            <h2 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Calendar size={18} style={{ color: 'var(--doctor-accent)' }} />
-              <span>Ca khám hôm nay của bạn ({todayStr.split('-').reverse().join('/')})</span>
-            </h2>
-            <p style={{ margin: '4px 0 0', fontSize: '0.8125rem', color: 'var(--gray-500)' }}>
-              Tiếp nhận bệnh nhân trong ngày hoặc chuyển sang tab lịch khám để xem các ngày tiếp theo
-            </p>
-          </div>
+      {/* Split View: Lịch tháng (trái) + Ca khám ngày đang chọn (phải) */}
+      <div className="doctor-schedule-split">
+        <DoctorCalendar
+          currentMonth={currentMonth}
+          calendar={calendar}
+          selectedDate={selectedDate}
+          todayStr={todayStr}
+          indicatorsByDate={indicatorsByDate}
+          loading={loading}
+          onPrevMonth={() => switchMonth(-1)}
+          onNextMonth={() => switchMonth(1)}
+          onGoToday={handleGoToday}
+          onSelectCell={handleSelectCell}
+        />
 
-          <button
-            className="btn btn-sm btn-outline"
-            onClick={() => navigate('/doctor/schedule')}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.825rem' }}
+        <div className="card">
+          <div
+            className="card-header"
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 12,
+              padding: '16px 20px',
+              borderBottom: '1px solid #f1f5f9',
+            }}
           >
-            <span>Lịch các ngày khác</span>
-            <ArrowRight size={14} />
-          </button>
-        </div>
-
-        <div className="card-body" style={{ padding: 0 }}>
-          {loading ? (
-            <div style={{ padding: 40, textAlign: 'center' }}>
-              <div className="spinner" style={{ margin: '0 auto' }} />
-              <p style={{ marginTop: 10, fontSize: '0.85rem', color: 'var(--gray-500)' }}>
-                Đang tải ca khám hôm nay...
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <h2 style={{ fontSize: '1.08rem', fontWeight: 800, margin: 0, color: 'var(--gray-900)' }}>
+                  {formatVietnameseDate(selectedDate)}
+                </h2>
+                <span className="badge" style={{ background: selectedBadge.bg, color: selectedBadge.color, fontWeight: 700, fontSize: '0.72rem' }}>
+                  {selectedBadge.label}
+                </span>
+              </div>
+              <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: 'var(--gray-500)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                <Clock size={13} />
+                <span>
+                  {selectedDaySessions.length > 0
+                    ? `Có ${selectedDaySessions.length} ca khám được phân công`
+                    : 'Không có ca khám nào trong ngày này'}
+                </span>
               </p>
             </div>
-          ) : todaySessions.length === 0 ? (
-            <div style={{ padding: 40, textAlign: 'center', color: 'var(--gray-400)' }}>
-              <Stethoscope size={40} style={{ marginBottom: 10, opacity: 0.35 }} />
-              <p style={{ fontWeight: 600, color: 'var(--gray-700)', margin: '0 0 4px' }}>
-                Hôm nay bạn chưa có ca khám nào được phân công
-              </p>
-              <p style={{ fontSize: '0.85rem', margin: '0 0 16px' }}>
-                Bạn có thể tra cứu lịch phân công ngày mai hoặc các ngày khác trong tuần
-              </p>
-              <button
-                type="button"
-                className="btn btn-sm btn-primary"
-                onClick={() => navigate('/doctor/schedule')}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <select
+                className="form-control"
+                value={shiftFilter}
+                onChange={(e) => setShiftFilter(e.target.value)}
+                aria-label="Lọc ca trực"
+                style={{ width: 132, height: 34, fontSize: '0.82rem', padding: '0 10px' }}
               >
-                <CalendarDays size={15} />
-                <span>Mở tab Lịch khám bệnh</span>
-              </button>
+                <option value="">Tất cả ca</option>
+                <option value="MORNING">Ca Sáng</option>
+                <option value="AFTERNOON">Ca Chiều</option>
+              </select>
+
+              <select
+                className="form-control"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                aria-label="Lọc trạng thái"
+                style={{ width: 148, height: 34, fontSize: '0.82rem', padding: '0 10px' }}
+              >
+                <option value="">Mọi trạng thái</option>
+                <option value="OPEN">Đang mở</option>
+                <option value="CLOSED">Đã đóng</option>
+              </select>
             </div>
-          ) : (
-            <div className="table-responsive">
-              <table className="data-table" style={{ margin: 0, width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-                    <th style={{ width: 80, textAlign: 'center', padding: '12px 16px' }}>MÃ CA</th>
-                    <th style={{ minWidth: 180, padding: '12px 16px' }}>CA TRỰC</th>
-                    <th style={{ minWidth: 200, padding: '12px 16px' }}>TIẾP NHẬN BỆNH NHÂN</th>
-                    <th style={{ minWidth: 130, padding: '12px 16px' }}>PHÍ KHÁM</th>
-                    <th style={{ minWidth: 120, padding: '12px 16px' }}>TRẠNG THÁI</th>
-                    <th style={{ minWidth: 220, textAlign: 'center', padding: '12px 16px' }}>THAO TÁC</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {todaySessions.map((s) => {
-                    const isMorning = s.shift === 'MORNING';
-                    const booked = s.lastQueueNumber || 0;
-                    const max = s.maxPatients || 0;
-                    const percent = max > 0 ? Math.min(100, Math.round((booked / max) * 100)) : 0;
+          </div>
 
-                    return (
-                      <tr key={s.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                        <td style={{ textAlign: 'center', fontWeight: 700, color: 'var(--gray-700)', padding: '14px 16px' }}>
-                          #{s.id}
-                        </td>
+          <div className="card-body" style={{ padding: 20 }}>
+            {loading && monthSessions.length === 0 ? (
+              <div style={{ padding: '48px 20px', textAlign: 'center' }}>
+                <div className="spinner" style={{ margin: '0 auto' }} />
+                <p style={{ marginTop: 12, fontSize: '0.875rem', color: 'var(--gray-500)' }}>
+                  Đang tải lịch khám của bác sĩ...
+                </p>
+              </div>
+            ) : selectedDaySessions.length === 0 ? (
+              <div style={{ padding: '44px 20px', textAlign: 'center', color: 'var(--gray-400)' }}>
+                <Calendar size={44} style={{ margin: '0 auto 12px', opacity: 0.35 }} />
+                <p style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--gray-700)', margin: '0 0 6px' }}>
+                  Không có ca khám nào vào ngày {formatShortDate(selectedDate)}
+                </p>
+                <p style={{ fontSize: '0.85rem', color: 'var(--gray-500)', margin: '0 0 16px' }}>
+                  {(shiftFilter || statusFilter) && (sessionsByDate.get(selectedDate)?.length || 0) > 0
+                    ? 'Có ca khám trong ngày này nhưng không khớp bộ lọc Ca trực / Trạng thái hiện tại.'
+                    : 'Hãy chọn các ngày có dấu chấm màu trên lịch để xem ca trực được phân công.'}
+                </p>
 
-                        <td style={{ padding: '14px 16px' }}>
-                          <span
-                            className="badge"
-                            style={{
-                              background: isMorning ? '#eff6ff' : '#fff7ed',
-                              color: isMorning ? '#1d4ed8' : '#c2410c',
-                              border: '1px solid',
-                              borderColor: isMorning ? '#bfdbfe' : '#fed7aa',
-                              fontWeight: 700,
-                              fontSize: '0.78rem',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: 6,
-                              padding: '5px 10px',
-                            }}
-                          >
-                            {isMorning ? <Sun size={13} /> : <Sunset size={13} />}
-                            {isMorning ? 'Sáng (08:00 - 12:00)' : 'Chiều (13:30 - 17:30)'}
-                          </span>
-                        </td>
+                <div style={{ display: 'flex', justifyContent: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  {(shiftFilter || statusFilter) && (
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline"
+                      onClick={() => {
+                        setShiftFilter('');
+                        setStatusFilter('');
+                      }}
+                    >
+                      Xóa bộ lọc
+                    </button>
+                  )}
 
-                        <td style={{ padding: '14px 16px' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                            <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--gray-800)' }}>
-                              {booked} / {max} <span style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--gray-500)' }}>bệnh nhân</span>
-                            </span>
-                            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: percent >= 90 ? '#dc2626' : 'var(--gray-500)' }}>
-                              {percent}%
-                            </span>
-                          </div>
-                          <div style={{ height: 6, width: '100%', background: '#e2e8f0', borderRadius: 3, overflow: 'hidden' }}>
-                            <div
-                              style={{
-                                height: '100%',
-                                width: `${percent}%`,
-                                background: percent >= 90 ? '#ef4444' : percent >= 60 ? '#f59e0b' : 'var(--doctor-accent)',
-                                borderRadius: 3,
-                              }}
-                            />
-                          </div>
-                        </td>
-
-                        <td style={{ padding: '14px 16px', fontWeight: 700, color: 'var(--gray-900)', fontSize: '0.875rem' }}>
-                          {Number(s.examinationFee || 0).toLocaleString('vi-VN')} đ
-                        </td>
-
-                        <td style={{ padding: '14px 16px' }}>
-                          {s.status === 'OPEN' ? (
-                            <span className="badge" style={{ background: '#dcfce7', color: '#16a34a', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                              <CheckCircle2 size={12} /> Đang mở
-                            </span>
-                          ) : (
-                            <span className="badge" style={{ background: '#f1f5f9', color: '#64748b', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                              <XCircle size={12} /> Đã đóng
-                            </span>
-                          )}
-                        </td>
-
-                        <td style={{ padding: '14px 16px', textAlign: 'center' }}>
-                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                            <button
-                              type="button"
-                              className="btn btn-sm btn-primary"
-                              onClick={() => navigate(`/doctor/sessions/${s.id}`, { state: { session: s } })}
-                              style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: 6,
-                                fontSize: '0.8rem',
-                                fontWeight: 700,
-                                background: 'var(--doctor-accent)',
-                                borderColor: 'var(--doctor-accent)',
-                              }}
-                            >
-                              <Stethoscope size={14} />
-                              <span>Vào khám</span>
-                              <ArrowRight size={13} />
-                            </button>
-
-                            <button
-                              type="button"
-                              className="btn btn-sm btn-outline"
-                              onClick={() => setViewingSession(s)}
-                              style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: 6,
-                                fontSize: '0.8rem',
-                              }}
-                            >
-                              <Eye size={13} />
-                              <span>DS hẹn</span>
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Doctor Info Card */}
-      <div className="card">
-        <div className="card-body">
-          <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 16, color: 'var(--gray-900)' }}>
-            Hồ sơ bác sĩ nha khoa
-          </h3>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
-            {user?.ava ? (
-              <img src={user.ava} alt="avatar" className="avatar avatar-lg" />
+                  {nearestScheduledDate && (
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-primary"
+                      onClick={() => setSelectedDate(nearestScheduledDate)}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        background: 'var(--doctor-accent)',
+                        borderColor: 'var(--doctor-accent)',
+                      }}
+                    >
+                      <CalendarDays size={14} />
+                      <span>Đến ngày có lịch gần nhất ({formatShortDate(nearestScheduledDate)})</span>
+                    </button>
+                  )}
+                </div>
+              </div>
             ) : (
-              <div className="avatar-placeholder avatar-lg" style={{ width: 80, height: 80, fontSize: '1.5rem' }}>
-                {user?.fullName?.charAt(0)}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                {selectedDaySessions.map((session) => (
+                  <SessionCard
+                    key={session.id}
+                    session={session}
+                    onOpenDetail={(s) => navigate(`/doctor/sessions/${s.id}`, { state: { session: s } })}
+                    onOpenAppointments={(s) => setViewingSession(s)}
+                  />
+                ))}
               </div>
             )}
-            <div>
-              <div style={{ fontSize: '1.125rem', fontWeight: 700, color: 'var(--gray-900)' }}>
-                {user?.fullName}
-              </div>
-              <div style={{ fontSize: '0.875rem', color: 'var(--gray-500)' }}>{user?.email}</div>
-              <div style={{ fontSize: '0.875rem', color: 'var(--gray-500)', marginTop: 2 }}>
-                SĐT: {user?.phone || 'Chưa cập nhật'}
-              </div>
-            </div>
           </div>
         </div>
       </div>
 
-      {/* Modal appointments */}
       {viewingSession && (
         <SessionAppointmentsModal
           session={viewingSession}

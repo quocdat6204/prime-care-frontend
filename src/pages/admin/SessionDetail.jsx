@@ -259,7 +259,7 @@ export default function SessionDetail() {
       <div style={{ marginBottom: 16 }}>
         <button
           type="button"
-          onClick={() => navigate('/admin/sessions')}
+          onClick={() => navigate(isAdmin ? '/admin/sessions' : '/doctor')}
           className="btn btn-sm btn-ghost"
           style={{
             display: 'inline-flex',
@@ -272,7 +272,7 @@ export default function SessionDetail() {
           }}
         >
           <ArrowLeft size={16} />
-          <span>Quay lại Quản lý ca khám</span>
+          <span>{isAdmin ? 'Quay lại Quản lý ca khám' : 'Quay lại Bảng điều khiển'}</span>
         </button>
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 14 }}>

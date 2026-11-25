@@ -66,7 +66,6 @@ export default function DashboardLayout({ children }) {
           profilePath: '/doctor/profile',
           links: [
             { to: '/doctor', end: true, label: 'Bảng điều khiển', icon: <LayoutDashboard size={18} /> },
-            { to: '/doctor/schedule', label: 'Lịch khám bệnh', icon: <Calendar size={18} /> },
             { to: '/doctor/ai-diagnosis', label: 'AI đọc phim X-quang', icon: <Sparkles size={18} /> },
             { to: '/doctor/profile', label: 'Hồ sơ chuyên môn', icon: <Stethoscope size={18} /> },
           ],
@@ -100,7 +99,7 @@ export default function DashboardLayout({ children }) {
       <header className="dashboard-topbar">
         <div className="dash-topbar-left">
           <Link to={config.dashboardPath} className="dash-brand-link">
-            <PrimeLogo size={28} />
+            <PrimeLogo size={32} showText={false} />
             <div className="dash-brand-titles">
               <span className="dash-brand-name">Primecare</span>
               <span className="dash-brand-portal">{config.portalTitle}</span>

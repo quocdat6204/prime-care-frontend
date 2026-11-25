@@ -1,4 +1,4 @@
-export default function PrimeLogo({ size = 36, light = false }) {
+export default function PrimeLogo({ size = 36, light = false, showText = true }) {
   return (
     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, textDecoration: 'none' }}>
       <svg
@@ -29,20 +29,22 @@ export default function PrimeLogo({ size = 36, light = false }) {
           fillOpacity="0.18"
         />
       </svg>
-      <span
-        style={{
-          fontFamily: "'Plus Jakarta Sans', sans-serif",
-          fontWeight: 800,
-          fontSize: typeof size === 'number' ? size * 0.72 : '1.5rem',
-          letterSpacing: '-0.03em',
-          color: light ? '#FFFFFF' : '#0F172A',
-          display: 'flex',
-          alignItems: 'baseline',
-        }}
-      >
-        <span>Prime</span>
-        <span style={{ color: '#4F46E5' }}>care</span>
-      </span>
+      {showText && (
+        <span
+          style={{
+            fontFamily: "'Plus Jakarta Sans', sans-serif",
+            fontWeight: 800,
+            fontSize: typeof size === 'number' ? size * 0.72 : '1.5rem',
+            letterSpacing: '-0.03em',
+            color: light ? '#FFFFFF' : '#0F172A',
+            display: 'flex',
+            alignItems: 'baseline',
+          }}
+        >
+          <span>Prime</span>
+          <span style={{ color: '#4F46E5' }}>care</span>
+        </span>
+      )}
     </div>
   );
 }
